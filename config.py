@@ -1,12 +1,25 @@
 """
 酒店智能调价系统 - 配置文件
-"""
 
-# 携程账号
+敏感信息（携程账号、密码、酒店ID、通知手机号等）不再硬编码在本文件中，
+统一从环境变量读取。请复制 .env.example 为 .env 并填入真实值。
+"""
+import os
+
+# 可选：如安装了 python-dotenv，自动加载项目根目录的 .env 文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 携程账号（从环境变量读取，切勿写死在代码里）
 CTRIP_CONFIG = {
-    "username": "300130",
-    "password": "bk300130",
-    "hotel_id": "300130"  # 酒店ID
+    "username": os.environ.get("CTRIP_USERNAME", ""),
+    "password": os.environ.get("CTRIP_PASSWORD", ""),
+    "hotel_id": os.environ.get("CTRIP_HOTEL_ID", "")  # 酒店ID
 }
 
 # 竞品筛选条件
@@ -29,10 +42,10 @@ PRICING_STRATEGY = {
     "max_price": 180                  # 最高价限制
 }
 
-# 微信通知（使用 Clawdbot message 工具）
+# 微信/WhatsApp 通知（接收人从环境变量读取）
 WECHAT_CONFIG = {
-    "enabled": True,
-    "recipient": "+8613907574397"  # 老韩的 WhatsApp（可以用 message 工具）
+    "enabled": os.environ.get("NOTIFY_ENABLED", "true").lower() == "true",
+    "recipient": os.environ.get("NOTIFY_RECIPIENT", "")
 }
 
 # 定时任务
@@ -41,7 +54,7 @@ SCHEDULE_CONFIG = {
     "auto_adjust": False        # 建议模式（手动确认）
 }
 
-# 数据库
+# 数据库（默认放在项目目录下，可用环境变量覆盖）
 DATABASE = {
-    "path": "/root/hotel-pricing/pricing.db"
+    "path": os.environ.get("PRICING_DB_PATH", os.path.join(_BASE_DIR, "pricing.db"))
 }
