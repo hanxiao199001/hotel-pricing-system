@@ -120,13 +120,19 @@ crontab -e
 
 编辑 `config.py` 修改参数：
 
+敏感信息（携程账号、密码、酒店ID、通知手机号）不再写在代码里，统一通过环境变量配置。
+复制 `.env.example` 为 `.env` 并填入真实值：
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 CTRIP_USERNAME / CTRIP_PASSWORD / CTRIP_HOTEL_ID 等
+```
+
+`CTRIP_USERNAME`、`CTRIP_PASSWORD`、`CTRIP_HOTEL_ID` 缺失或为空时，程序会在启动时直接退出，不会带着空凭据去跑爬虫。`NOTIFY_ENABLED` 为 true（未设置时默认 true）时，`NOTIFY_RECIPIENT` 同样必填；不需要通知请设 `NOTIFY_ENABLED=false`。
+
+定价策略仍在 `config.py` 中调整：
+
 ```python
-# 携程账号
-CTRIP_CONFIG = {
-    "username": "300130",
-    "password": "bk300130",
-    "hotel_id": "300130"
-}
 
 # 定价策略
 PRICING_STRATEGY = {
@@ -181,5 +187,5 @@ PRICING_STRATEGY = {
 
 ---
 
-**最后更新：** 2026-01-28  
-**部署位置：** 47.82.159.93:/root/hotel-pricing
+**最后更新：** 2026-08-28  
+**部署位置：** 见内部运维文档（不在仓库中记录服务器地址）

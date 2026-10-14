@@ -1,5 +1,26 @@
-*.db
-*.log
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 数据库与日志
+*.db
+*.sqlite3
+*.log
+
+# 环境变量（真实凭据，切勿提交）
 .env
-*.pyc
+
+# 编辑器/系统
+.DS_Store
+.idea/
+.vscode/

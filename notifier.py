@@ -3,13 +3,15 @@
 酒店调价系统 - WhatsApp 通知模块
 通过 Clawdbot message 工具发送通知
 """
+import os
 import subprocess
 import json
 from datetime import datetime
 
 class WhatsAppNotifier:
-    def __init__(self, recipient: str = "+8613907574397"):
-        self.recipient = recipient
+    def __init__(self, recipient: str = None):
+        # 接收人不再硬编码，默认从环境变量 NOTIFY_RECIPIENT 读取
+        self.recipient = recipient or os.environ.get("NOTIFY_RECIPIENT", "")
     
     def send_pricing_notification(self, data: dict):
         """发送调价建议通知"""
