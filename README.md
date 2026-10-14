@@ -128,6 +128,8 @@ cp .env.example .env
 # 编辑 .env 填入 CTRIP_USERNAME / CTRIP_PASSWORD / CTRIP_HOTEL_ID 等
 ```
 
+`CTRIP_USERNAME`、`CTRIP_PASSWORD`、`CTRIP_HOTEL_ID` 缺失或为空时，程序会在启动时直接退出，不会带着空凭据去跑爬虫。`NOTIFY_ENABLED` 为 true（未设置时默认 true）时，`NOTIFY_RECIPIENT` 同样必填；不需要通知请设 `NOTIFY_ENABLED=false`。
+
 定价策略仍在 `config.py` 中调整：
 
 ```python

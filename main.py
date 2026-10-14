@@ -33,6 +33,9 @@ def send_wechat_notification(message: str):
 
 def run_pricing_check():
     """执行一次定价检查"""
+    # 再次确认，避免被直接调用时带着空凭据去登录
+    cfg.validate_startup_config()
+
     print("\n" + "="*60)
     print(f"🏨 开始定价检查 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
@@ -166,15 +169,28 @@ def run_pricing_check():
     print("✅ 检查完成")
     print("="*60 + "\n")
 
+def _exit_on_config_error(exc: cfg.ConfigError):
+    print(f"❌ 启动失败: {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
+
+
 def main():
     """主函数"""
     print("🏨 酒店智能调价系统")
     print("版本: MVP v1.0")
     print("模式: 建议模式（需手动确认调价）\n")
-    
+
+    # 必填环境变量缺失时立刻退出，不要进入爬虫
+    try:
+        cfg.validate_startup_config()
+    except cfg.ConfigError as exc:
+        _exit_on_config_error(exc)
+
     # 执行一次检查
     try:
         run_pricing_check()
+    except cfg.ConfigError as exc:
+        _exit_on_config_error(exc)
     except Exception as e:
         print(f"❌ 错误: {e}")
         import traceback

@@ -3,6 +3,7 @@
 
 敏感信息（携程账号、密码、酒店ID、通知手机号等）不再硬编码在本文件中，
 统一从环境变量读取。请复制 .env.example 为 .env 并填入真实值。
+启动时调用 validate_startup_config()：必填项缺失或为空则立即失败。
 """
 import os
 
@@ -58,3 +59,44 @@ SCHEDULE_CONFIG = {
 DATABASE = {
     "path": os.environ.get("PRICING_DB_PATH", os.path.join(_BASE_DIR, "pricing.db"))
 }
+
+# 启动必填项：字段名 -> 对应环境变量。空白与缺失同等对待。
+_REQUIRED_CTRIP_FIELDS = (
+    ("username", "CTRIP_USERNAME"),
+    ("password", "CTRIP_PASSWORD"),
+    ("hotel_id", "CTRIP_HOTEL_ID"),
+)
+
+
+class ConfigError(RuntimeError):
+    """启动配置不完整，拒绝带着空凭据继续运行。"""
+
+
+def _is_blank(value) -> bool:
+    return value is None or str(value).strip() == ""
+
+
+def validate_startup_config(ctrip_config=None, wechat_config=None):
+    """检查爬虫与通知所需配置。缺失或为空时抛出 ConfigError。
+
+    未传入参数时检查本模块已加载的配置（即进程环境变量 / .env）。
+    NOTIFY_ENABLED 为真（默认即为真）时，NOTIFY_RECIPIENT 也必填。
+    """
+    ctrip = CTRIP_CONFIG if ctrip_config is None else ctrip_config
+    wechat = WECHAT_CONFIG if wechat_config is None else wechat_config
+
+    missing = [
+        env_name
+        for field, env_name in _REQUIRED_CTRIP_FIELDS
+        if _is_blank(ctrip.get(field))
+    ]
+    if wechat.get("enabled") and _is_blank(wechat.get("recipient")):
+        missing.append("NOTIFY_RECIPIENT")
+
+    if not missing:
+        return
+
+    hint = "请在环境变量或 .env 中填写这些值（参考 .env.example）。"
+    if "NOTIFY_RECIPIENT" in missing:
+        hint += " 若不需要通知，请设置 NOTIFY_ENABLED=false。"
+    raise ConfigError(f"缺少必填环境变量: {', '.join(missing)}。{hint}")
