@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小海 · 酒店智能决策中台</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231c4f63'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'>海</text></svg>">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">海</div>
+      <div>
+        <b>小海</b>
+        <span>酒店智能决策中台</span>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div class="hotel-chip" id="sideHotel">加载中…</div>
+      <div class="src-legend">
+        <div><i style="background:#2f9e6e"></i>实时数据（走采集与算法）</div>
+        <div><i style="background:#d9a03c"></i>历史快照（真实采集，非实时）</div>
+        <div><i style="background:#c8c5bb"></i>示例数据（模块未实现）</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">概览</h1>
+        <div class="sub" id="pageSub"></div>
+      </div>
+      <div class="top-actions">
+        <span class="badge" id="srcBadge">—</span>
+        <button class="btn" id="btnRefresh" title="重新拉取数据">刷新</button>
+        <button class="btn primary" id="btnCollect">立即采集</button>
+      </div>
+    </header>
+    <div class="content" id="content">
+      <div class="loading">正在加载…</div>
+    </div>
+  </div>
+</div>
+
+<div class="jobbar" id="jobbar">
+  <div class="jb-head">
+    <div class="spinner" id="jbSpin"></div>
+    <b id="jbTitle">采集中…</b>
+    <span class="badge" id="jbState">running</span>
+    <div class="spacer"></div>
+    <button class="btn ghost sm" id="jbClose">收起</button>
+  </div>
+  <div class="jb-body"><pre id="jbLog"></pre></div>
+  <div class="jb-foot"><span id="jbHint">正在调用采集脚本，通常需要 30–90 秒</span></div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>

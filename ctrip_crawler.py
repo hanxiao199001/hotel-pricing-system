@@ -1,10 +1,23 @@
 """
 携程数据抓取模块
-注：当前为模拟版本，后续接入真实携程API
+
+两种实现，由 config.DATA_SOURCE 选择：
+  CtripCrawler     - 模拟数据，用于开发与测试
+  RealCtripCrawler - 调用 ctrip_hotel_scraper.py 抓取真实 OTA 数据
+
+真实采集的已知边界（实测确认）：
+  - OTA 搜索把自家酒店当作中心点排除，结果里不含自己，所以
+    current_price / occupancy_rate 必须由 config.MY_HOTEL 人工提供；
+  - 采集是有头浏览器 + 可能的人工验证，一次约 1 分钟（不含详情页房型）。
 """
+import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+
+from scrapers.adapters import to_competitors
+from scrapers.runner import ScraperError, run_scraper
+from scrapers.validator import DataValidationError, validate_result
 
 class CtripCrawler:
     def __init__(self, username: str, password: str, hotel_id: str):
@@ -128,8 +141,134 @@ class CtripCrawler:
         print("✅ 调价成功（模拟）")
         return True
 
-def create_crawler(config: Dict) -> CtripCrawler:
-    """创建携程爬虫实例"""
+class RealCtripCrawler:
+    """调用独立采集脚本获取真实携程数据。"""
+
+    def __init__(self, scraper_config: Dict, my_hotel: Dict,
+                 competitor_filter: Optional[Dict] = None):
+        self.cfg = scraper_config or {}
+        self.my_hotel = my_hotel or {}
+        self.filter = competitor_filter or {}
+        self.last_stats: Dict = {}
+
+    def login(self) -> bool:
+        """公开列表页无需登录，这里只确认采集环境就绪。"""
+        problems = []
+        if not os.path.isfile(self.cfg.get("python") or ""):
+            problems.append(f"采集解释器不存在: {self.cfg.get('python')}")
+        if not os.path.isfile(self.cfg.get("script") or ""):
+            problems.append(f"采集脚本不存在: {self.cfg.get('script')}")
+        if problems:
+            for line in problems:
+                print(f"❌ {line}")
+            print("   提示: 用 SCRAPER_PYTHON / CTRIP_SCRAPER_SCRIPT 指定正确路径。")
+            return False
+        print(f"✅ 采集环境就绪（公开页无需登录）: 渠道={self.cfg.get('channel')}")
+        return True
+
+    def get_my_hotel_data(self) -> Optional[Dict]:
+        """自家酒店数据。
+
+        OTA 列表不含自家酒店，无法从采集结果推导，只能取人工配置值。
+        """
+        price = self.my_hotel.get("current_price")
+        occupancy = self.my_hotel.get("occupancy_rate")
+
+        if price is None or occupancy is None:
+            import config as cfg
+            raise cfg.ConfigError(
+                "真实模式下必须提供自家酒店的当前价格与入住率"
+                "（MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE）。"
+                "OTA 搜索会把自家酒店排除在结果之外，无法自动获取。"
+            )
+
+        rooms_total = self.my_hotel.get("rooms_total")
+        rooms_available = None
+        if rooms_total:
+            rooms_available = int(round(float(rooms_total) * (1 - float(occupancy) / 100.0)))
+
+        data = {
+            "date": str(datetime.now().date()),
+            "hotel_id": self.my_hotel.get("hotel_id"),
+            "hotel_name": self.my_hotel.get("name") or "自家酒店",
+            "current_price": round(float(price), 2),
+            "occupancy_rate": round(float(occupancy), 2),
+            "rooms_available": rooms_available,
+            "rooms_total": int(rooms_total) if rooms_total else None,
+            "revenue_today": 0,
+        }
+        print(f"  当前价格: ¥{data['current_price']}（人工配置）")
+        print(f"  入住率: {data['occupancy_rate']}%（人工配置）")
+        return data
+
+    def get_competitor_hotels(self, city: str, distance_km: float,
+                              price_min: float = None, price_max: float = None,
+                              checkin: str = None, checkout: str = None) -> List[Dict]:
+        """抓取竞品酒店。
+
+        price_min / price_max 在真实模式下不参与过滤：实测同城周边价格跨度可达
+        63~601 元，用固定区间会直接清空结果。价格分层交给算法层处理。
+        """
+        place = self.my_hotel.get("name") or ""
+        if not place:
+            import config as cfg
+            raise cfg.ConfigError("真实模式需要 MY_HOTEL_NAME 作为采集中心点。")
+
+        checkin = checkin or str(datetime.now().date())
+        checkout = checkout or str(datetime.now().date() + timedelta(days=1))
+        distance_m = int(round(float(distance_km) * 1000))
+
+        print(f"🔍 调用携程采集脚本: 中心点={place} 城市={city} 距离<={distance_m}m")
+        raw = run_scraper(self.cfg, place, city, distance_m, checkin, checkout)
+
+        try:
+            validated = validate_result(
+                raw,
+                expected_city=city,
+                expected_place=place,
+                profile_hint=self.cfg.get("profile", ""),
+            )
+        except DataValidationError as exc:
+            # 把采集脚本的日志尾巴带出来，否则「0 家」这种结果无法定位原因
+            log_tail = (raw.get("_stdout") or "").strip()[-800:]
+            if log_tail:
+                raise DataValidationError(f"{exc}\n\n采集脚本日志（末尾）:\n{log_tail}") from exc
+            raise
+        self.last_stats = validated["stats"]
+        stats = self.last_stats
+        print(
+            f"✅ 采集校验通过: 原始 {stats['total_raw']} 条 → 有效 {stats['total_valid']} 条"
+            f"（无价格丢弃 {stats['dropped_no_price']}，重复丢弃 {stats['dropped_duplicate']}）"
+        )
+
+        competitors = to_competitors(validated["hotels"], checkin)
+
+        if price_min is not None and price_max is not None:
+            in_range = [c for c in competitors if price_min <= c["price"] <= price_max]
+            if len(in_range) < len(competitors):
+                print(
+                    f"ℹ️  价格区间 {price_min:.0f}-{price_max:.0f} 元仅供参考，未用于过滤："
+                    f"区间内有 {len(in_range)} 家，实际保留全部 {len(competitors)} 家。"
+                )
+
+        return competitors
+
+    def adjust_price(self, new_price: float) -> bool:
+        """真实调价需要商家后台权限，当前 MVP 不实现。"""
+        print(f"⚠️  真实模式不支持自动调价（请求价 ¥{new_price}）。")
+        return False
+
+
+def create_crawler(config: Dict, data_source: Optional[str] = None):
+    """按 config.DATA_SOURCE 创建采集器：real = 真实脚本，mock = 模拟数据。"""
+    if data_source is None:
+        import config as cfg
+        data_source = cfg.DATA_SOURCE
+
+    if (data_source or "mock").strip().lower() == "real":
+        import config as cfg
+        return RealCtripCrawler(cfg.SCRAPER_CONFIG, cfg.MY_HOTEL, cfg.COMPETITOR_FILTER)
+
     return CtripCrawler(
         username=config['username'],
         password=config['password'],

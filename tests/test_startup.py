@@ -20,10 +20,12 @@ def test_missing_ctrip_credentials_raise():
             DISABLED_NOTIFY,
         )
     message = str(exc.value)
-    assert "CTRIP_USERNAME" in message
-    assert "CTRIP_PASSWORD" in message
-    assert "CTRIP_HOTEL_ID" in message
-    assert "NOTIFY_RECIPIENT" not in message
+    # 只检查「缺失清单」那一段，诊断信息里会列出 .env 的键名，不代表该项被要求
+    missing_line = message.split("诊断信息:")[0]
+    assert "CTRIP_USERNAME" in missing_line
+    assert "CTRIP_PASSWORD" in missing_line
+    assert "CTRIP_HOTEL_ID" in missing_line
+    assert "NOTIFY_RECIPIENT" not in missing_line
 
 
 def test_partial_ctrip_credentials_still_fail():
@@ -50,6 +52,7 @@ def test_complete_config_passes():
 
 def test_main_exits_before_scraper_when_config_missing(monkeypatch, capsys):
     import main
+    import pipeline
 
     monkeypatch.setattr(
         config,
@@ -61,7 +64,8 @@ def test_main_exits_before_scraper_when_config_missing(monkeypatch, capsys):
     def _crawler_must_not_start(*_args, **_kwargs):
         raise AssertionError("爬虫不应在配置检查失败后启动")
 
-    monkeypatch.setattr(main, "create_crawler", _crawler_must_not_start)
+    # 真正的创建点在 pipeline 里（CLI 与中台共用同一份工作流）
+    monkeypatch.setattr(pipeline, "create_crawler", _crawler_must_not_start)
     monkeypatch.setattr(
         main,
         "run_pricing_check",
@@ -91,6 +95,7 @@ def test_main_runs_check_when_config_present(monkeypatch):
 
 def test_run_pricing_check_rejects_empty_credentials(monkeypatch):
     import main
+    import pipeline
 
     monkeypatch.setattr(
         config,
@@ -99,10 +104,44 @@ def test_run_pricing_check_rejects_empty_credentials(monkeypatch):
     )
     monkeypatch.setattr(config, "WECHAT_CONFIG", dict(DISABLED_NOTIFY))
     monkeypatch.setattr(
-        main,
+        pipeline,
         "create_crawler",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("不应创建爬虫")),
     )
 
     with pytest.raises(ConfigError, match="CTRIP_USERNAME"):
         main.run_pricing_check()
+
+
+def test_builtin_env_parser_handles_comments_quotes_and_export(tmp_path):
+    """没装 python-dotenv 时的兜底解析：注释、空行、引号、export 前缀都要正确处理。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# 注释行\n"
+        "\n"
+        "CTRIP_USERNAME=user001\n"
+        'CTRIP_PASSWORD="p@ss=word"\n'
+        "export CTRIP_HOTEL_ID='123'\n"
+        "EMPTY_VALUE=\n",
+        encoding="utf-8",
+    )
+
+    values = config._parse_env_file(str(env_file))
+
+    assert values["CTRIP_USERNAME"] == "user001"
+    assert values["CTRIP_PASSWORD"] == "p@ss=word"
+    assert values["CTRIP_HOTEL_ID"] == "123"
+    assert values["EMPTY_VALUE"] == ""
+
+
+def test_config_error_reports_diagnostics():
+    """启动失败时必须给出解释器、工作目录和 .env 路径，便于区分「没读到」和「没填」。"""
+    with pytest.raises(ConfigError) as exc:
+        validate_startup_config(
+            {"username": "", "password": "", "hotel_id": ""},
+            dict(DISABLED_NOTIFY),
+        )
+    message = str(exc.value)
+    assert "诊断信息" in message
+    assert "当前解释器" in message
+    assert ".env" in message

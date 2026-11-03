@@ -24,3 +24,9 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# 点评采集的中间文件（成功后会被原子替换掉，失败时可能残留）
+data/reviews/*.collecting.json
+
+# 临时工作文件（画图中间产物等）
+.temp/

@@ -1,0 +1,802 @@
+{
+  "meta": {
+    "hotel": "君华海逸酒店",
+    "city": "海口",
+    "updated": "2026-11-02",
+    "disclaimer": "差评预警、口碑分析、差评回复已接入真实点评快照（见各页顶部标注）；其余 4 个模块（经营报表 / 客源结构 / 办公协同 / 集团驾驶舱）尚未实现采集与计算，页面展示的是结构完整的示例数据，所有数值均为静态占位，不可用于经营决策。"
+  },
+  "modules": {
+    "reviews": {
+      "title": "差评预警与回复",
+      "subtitle": "多平台差评抓取 · 回复草稿 · 待人工确认后发布",
+      "status": "static",
+      "statusNote": "差评抓取与自动回复尚未接入，当前为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "本周新差评",
+              "value": "6 条",
+              "sub": "携程 4 · 美团 1 · 飞猪 1",
+              "tone": "warm"
+            },
+            {
+              "label": "待人工确认",
+              "value": "2 条",
+              "sub": "草稿已生成"
+            },
+            {
+              "label": "平均响应时长",
+              "value": "3.2 h",
+              "sub": "目标 ≤ 2 h",
+              "tone": "warm"
+            },
+            {
+              "label": "同类问题累计",
+              "value": "3 条",
+              "sub": "近 90 天空调类",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "title": "等你确认的回复草稿",
+          "items": [
+            {
+              "label": "携程 · 1 星 · 空调有异味",
+              "value": "草稿已生成 · 10 分钟前抓到",
+              "tone": "warm"
+            },
+            {
+              "label": "美团 · 2 星 · 隔音差，半夜被走廊吵醒",
+              "value": "草稿已生成 · 今天 09:20",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "quote",
+          "title": "回复草稿（携程 · 空调异味）",
+          "text": "您好，看到您反映房间空调异味，非常抱歉。我们已安排工程部当日对该房间空调滤网深度清洗消毒，并对同楼层房间做全量排查。期待您再次入住检验，若方便请留下联系方式，我们将为您安排一间免费升级房。",
+          "footnote": "风格依据：差评回复先致歉、不找借口（店长 9 月 30 日设定）"
+        },
+        {
+          "type": "table",
+          "title": "本周差评明细",
+          "columns": [
+            {
+              "key": "platform",
+              "label": "平台"
+            },
+            {
+              "key": "date",
+              "label": "日期"
+            },
+            {
+              "key": "room",
+              "label": "房型"
+            },
+            {
+              "key": "score",
+              "label": "评分",
+              "align": "right"
+            },
+            {
+              "key": "keyword",
+              "label": "关键词"
+            },
+            {
+              "key": "status",
+              "label": "状态",
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "platform": "携程",
+              "date": "11-02",
+              "room": "高级海景大床",
+              "score": "1.0",
+              "keyword": "空调异味",
+              "status": "待确认",
+              "statusTone": "warm"
+            },
+            {
+              "platform": "美团",
+              "date": "11-02",
+              "room": "豪华双床",
+              "score": "2.0",
+              "keyword": "隔音差",
+              "status": "待确认",
+              "statusTone": "warm"
+            },
+            {
+              "platform": "携程",
+              "date": "11-01",
+              "room": "标准大床",
+              "score": "2.0",
+              "keyword": "布草有毛发",
+              "status": "已回复",
+              "statusTone": "ok"
+            },
+            {
+              "platform": "飞猪",
+              "date": "10-31",
+              "room": "高级海景大床",
+              "score": "3.0",
+              "keyword": "前台办理慢",
+              "status": "已回复",
+              "statusTone": "ok"
+            },
+            {
+              "platform": "携程",
+              "date": "10-30",
+              "room": "标准双床",
+              "score": "2.0",
+              "keyword": "热水不稳定",
+              "status": "已回复",
+              "statusTone": "ok"
+            },
+            {
+              "platform": "携程",
+              "date": "10-29",
+              "room": "豪华海景套房",
+              "score": "3.0",
+              "keyword": "早餐品类少",
+              "status": "已回复",
+              "statusTone": "ok"
+            }
+          ]
+        },
+        {
+          "type": "note",
+          "text": "接入这部分需要：① 携程/美团/飞猪 商家后台的点评读取权限（当前采集脚本只覆盖公开列表页，不包含点评）；② 回复发布是写操作，需要商家账号授权，建议只做到「草稿 + 人工在后台点发布」。"
+        }
+      ]
+    },
+    "reputation": {
+      "title": "多平台口碑分析",
+      "subtitle": "四维归类 · 每条点评可回溯到平台原帖",
+      "status": "static",
+      "statusNote": "点评抓取与四维归类尚未接入，当前为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "综合评分",
+              "value": "4.58",
+              "sub": "携程/美团/飞猪加权"
+            },
+            {
+              "label": "好评率",
+              "value": "91.2%",
+              "sub": "本月 412 条点评"
+            },
+            {
+              "label": "差评",
+              "value": "14 条",
+              "sub": "占 3.4%",
+              "tone": "warm"
+            },
+            {
+              "label": "环比",
+              "value": "+0.05",
+              "sub": "较上月",
+              "tone": "ok"
+            }
+          ]
+        },
+        {
+          "type": "bars",
+          "title": "四维拆解（提及次数 / 好评率）",
+          "items": [
+            {
+              "label": "环境",
+              "value": 96,
+              "detail": "提及 154 次 · 海景是最大加分项",
+              "tone": "ok"
+            },
+            {
+              "label": "服务",
+              "value": 93,
+              "detail": "提及 121 次 · 前厅点名表扬 11 次",
+              "tone": "ok"
+            },
+            {
+              "label": "卫生",
+              "value": 89,
+              "detail": "提及 86 次 · 差评 4 条，集中在布草换洗",
+              "tone": "warm"
+            },
+            {
+              "label": "设施",
+              "value": 87,
+              "detail": "提及 98 次 · 空调噪音/异味 3 条",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "分平台评分",
+          "columns": [
+            {
+              "key": "platform",
+              "label": "平台"
+            },
+            {
+              "key": "score",
+              "label": "评分",
+              "align": "right"
+            },
+            {
+              "key": "count",
+              "label": "点评数",
+              "align": "right"
+            },
+            {
+              "key": "bad",
+              "label": "差评",
+              "align": "right"
+            },
+            {
+              "key": "trend",
+              "label": "环比",
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "platform": "携程",
+              "score": "4.62",
+              "count": "2,180",
+              "bad": "9",
+              "trend": "+0.06",
+              "trendTone": "ok"
+            },
+            {
+              "platform": "美团",
+              "score": "4.51",
+              "count": "960",
+              "bad": "4",
+              "trend": "-0.03",
+              "trendTone": "warm"
+            },
+            {
+              "platform": "飞猪",
+              "score": "4.40",
+              "count": "430",
+              "bad": "1",
+              "trend": "+0.02",
+              "trendTone": "ok"
+            }
+          ]
+        },
+        {
+          "type": "banner",
+          "text": "卫生总体不差，但「布草换洗」是本季卫生差评的共同点，建议客房部把换洗记录数字化留痕，差评出现时可立刻回溯到班次。"
+        }
+      ]
+    },
+    "reports": {
+      "title": "经营报表",
+      "subtitle": "周报 / 月报 · 数字取自 PMS 与渠道后台",
+      "status": "static",
+      "statusNote": "PMS 未接入，本页为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "平均房价 ADR",
+              "value": "¥352",
+              "sub": "本周 10.27–11.02"
+            },
+            {
+              "label": "入住率",
+              "value": "61.4%",
+              "sub": "较上周 -2.1 pt",
+              "tone": "warm"
+            },
+            {
+              "label": "RevPAR",
+              "value": "¥216",
+              "sub": "ADR × 入住率"
+            },
+            {
+              "label": "客房收入",
+              "value": "¥128,640",
+              "sub": "环比 -1.8%",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "bars",
+          "title": "近 7 日入住率",
+          "suffix": "%",
+          "items": [
+            {
+              "label": "10-27 一",
+              "value": 58,
+              "detail": "ADR ¥341",
+              "tone": "muted"
+            },
+            {
+              "label": "10-28 二",
+              "value": 55,
+              "detail": "ADR ¥338",
+              "tone": "muted"
+            },
+            {
+              "label": "10-29 三",
+              "value": 61,
+              "detail": "ADR ¥349"
+            },
+            {
+              "label": "10-30 四",
+              "value": 64,
+              "detail": "ADR ¥355"
+            },
+            {
+              "label": "10-31 五",
+              "value": 72,
+              "detail": "ADR ¥362",
+              "tone": "ok"
+            },
+            {
+              "label": "11-01 六",
+              "value": 78,
+              "detail": "ADR ¥371",
+              "tone": "ok"
+            },
+            {
+              "label": "11-02 日",
+              "value": 61,
+              "detail": "ADR ¥352",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "收入分项",
+          "columns": [
+            {
+              "key": "item",
+              "label": "项目"
+            },
+            {
+              "key": "amount",
+              "label": "金额",
+              "align": "right"
+            },
+            {
+              "key": "mom",
+              "label": "环比",
+              "align": "right"
+            },
+            {
+              "key": "note",
+              "label": "说明"
+            }
+          ],
+          "rows": [
+            {
+              "item": "客房收入",
+              "amount": "¥128,640",
+              "mom": "-1.8%",
+              "momTone": "warm",
+              "note": "周中团队退订 3 单"
+            },
+            {
+              "item": "餐饮收入",
+              "amount": "¥36,410",
+              "mom": "+5.2%",
+              "momTone": "ok",
+              "note": "早茶套餐带动"
+            },
+            {
+              "item": "OTA 佣金支出",
+              "amount": "¥9,530",
+              "mom": "+0.4%",
+              "momTone": "warm",
+              "note": "占客房收入 7.4%"
+            },
+            {
+              "item": "能耗",
+              "amount": "¥8,960",
+              "mom": "-2.1%",
+              "momTone": "ok",
+              "note": "每间夜 ¥14.1"
+            }
+          ]
+        },
+        {
+          "type": "note",
+          "text": "接入这部分需要 PMS（或至少夜审报表导出）与三渠道后台的流水读取权限。当前系统的数据只有竞品价与自家挂牌价，没有实际成交、房态与成本，所以 ADR / RevPAR / 佣金都算不出来。"
+        }
+      ]
+    },
+    "guests": {
+      "title": "客源结构洞察",
+      "subtitle": "客源地 · 渠道 · 复购与会员",
+      "status": "static",
+      "statusNote": "PMS 订单数据未接入，本页为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "OTA 客源",
+              "value": "48%",
+              "sub": "携程 27 · 美团 15 · 飞猪 6"
+            },
+            {
+              "label": "协议单位",
+              "value": "31%",
+              "sub": "12 家协议"
+            },
+            {
+              "label": "散客上门",
+              "value": "16%",
+              "sub": "含前台直订"
+            },
+            {
+              "label": "旅行社团队",
+              "value": "5%",
+              "sub": "环比 -3 pt",
+              "tone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "bars",
+          "title": "客源地 TOP5（占比）",
+          "suffix": "%",
+          "items": [
+            {
+              "label": "海南本省",
+              "value": 42,
+              "detail": "以海口、三亚为主",
+              "tone": "ok"
+            },
+            {
+              "label": "广东",
+              "value": 19,
+              "detail": "同比 +38%，增长最快",
+              "tone": "ok"
+            },
+            {
+              "label": "北京",
+              "value": 11,
+              "detail": "以冬季候鸟客为主"
+            },
+            {
+              "label": "上海",
+              "value": 7,
+              "detail": "平均停留 2.4 晚"
+            },
+            {
+              "label": "四川",
+              "value": 5,
+              "detail": "团队客占比高",
+              "tone": "muted"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "渠道贡献",
+          "columns": [
+            {
+              "key": "channel",
+              "label": "渠道"
+            },
+            {
+              "key": "share",
+              "label": "占比",
+              "align": "right"
+            },
+            {
+              "key": "adr",
+              "label": "ADR",
+              "align": "right"
+            },
+            {
+              "key": "trend",
+              "label": "环比",
+              "align": "right"
+            },
+            {
+              "key": "note",
+              "label": "说明"
+            }
+          ],
+          "rows": [
+            {
+              "channel": "携程",
+              "share": "27%",
+              "adr": "¥364",
+              "trend": "+1.2 pt",
+              "trendTone": "ok",
+              "note": "主力渠道，量价稳定"
+            },
+            {
+              "channel": "美团",
+              "share": "15%",
+              "adr": "¥328",
+              "trend": "+0.8 pt",
+              "trendTone": "ok",
+              "note": "本地客占比高"
+            },
+            {
+              "channel": "飞猪",
+              "share": "6%",
+              "adr": "¥341",
+              "trend": "-4.0 pt",
+              "trendTone": "warm",
+              "note": "下滑明显，需排查排名"
+            },
+            {
+              "channel": "前台直订",
+              "share": "16%",
+              "adr": "¥356",
+              "trend": "+0.3 pt",
+              "trendTone": "ok",
+              "note": "零佣金，优先引导"
+            }
+          ]
+        },
+        {
+          "type": "banner",
+          "text": "广东客源同比增长最快（+38%），但飞猪渠道下滑 4 个点。建议先查飞猪店铺近期差评与搜索排名，再决定是否把资源挪到携程。"
+        }
+      ]
+    },
+    "tasks": {
+      "title": "办公协同",
+      "subtitle": "维修工单排班 · 跨部门提醒",
+      "status": "static",
+      "statusNote": "工单系统未接入，本页为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "本周工单",
+              "value": "12 张",
+              "sub": "已排班 9 张"
+            },
+            {
+              "label": "客诉关联",
+              "value": "3 张",
+              "sub": "空调类，需当天闭环",
+              "tone": "warm"
+            },
+            {
+              "label": "逾期",
+              "value": "1 张",
+              "sub": "1208 门锁，已逾期 2 天",
+              "tone": "warm"
+            },
+            {
+              "label": "平均闭环",
+              "value": "1.6 天",
+              "sub": "目标 ≤ 1 天",
+              "tone": "ok"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "工单排班（按客诉关联度排序）",
+          "columns": [
+            {
+              "key": "no",
+              "label": "#"
+            },
+            {
+              "key": "task",
+              "label": "工单"
+            },
+            {
+              "key": "owner",
+              "label": "负责人"
+            },
+            {
+              "key": "due",
+              "label": "计划时间",
+              "align": "right"
+            },
+            {
+              "key": "status",
+              "label": "状态",
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "no": "1",
+              "task": "3 间海景房空调滤网清洗（客诉关联）",
+              "owner": "工程部 · 李工",
+              "due": "今天 14:00 前",
+              "status": "进行中",
+              "statusTone": "warm"
+            },
+            {
+              "no": "2",
+              "task": "1208 房门锁电池更换",
+              "owner": "工程部 · 王工",
+              "due": "已逾期 2 天",
+              "status": "逾期",
+              "statusTone": "warm"
+            },
+            {
+              "no": "3",
+              "task": "大堂射灯 4 盏更换",
+              "owner": "工程部 · 李工",
+              "due": "周三下午淡时段",
+              "status": "已排班"
+            },
+            {
+              "no": "4",
+              "task": "洗衣房蒸汽阀检修（停机 2h）",
+              "owner": "外委 · 恒信设备",
+              "due": "周四下午",
+              "status": "已排班"
+            },
+            {
+              "no": "5",
+              "task": "5 层走廊地毯清洗",
+              "owner": "客房部 · 张姐",
+              "due": "周五 10:00",
+              "status": "已排班"
+            }
+          ]
+        },
+        {
+          "type": "quote",
+          "title": "跨部门提醒草稿（前厅部）",
+          "text": "空调清洗涉及 3 间海景房，今日 14:00–16:00 暂停售出，请留意排房。若已有预订请提前调房，避免客人到店后换房。",
+          "footnote": "规则依据：空调类投诉当天必须闭环（上月客诉记录形成）"
+        },
+        {
+          "type": "note",
+          "text": "接入这部分需要工单系统（或至少一张可读的工单表）与企微群机器人。发送消息是写操作，建议只做到「草稿 + 人工转发」。"
+        }
+      ]
+    },
+    "group": {
+      "title": "集团驾驶舱",
+      "subtitle": "只看共享池与匿名计数 · 不收房态、房价、客人信息",
+      "status": "static",
+      "statusNote": "多门店数据与共享池均未实现，本页为示例数据",
+      "blocks": [
+        {
+          "type": "kpi",
+          "items": [
+            {
+              "label": "开通助手的门店",
+              "value": "12",
+              "sub": "本月新开 2 家"
+            },
+            {
+              "label": "本月替门店办的事",
+              "value": "3,180",
+              "sub": "调价 1,120 · 差评 860 · 报表 540"
+            },
+            {
+              "label": "共享池差评标签",
+              "value": "428",
+              "sub": "空调 96 · 布草 74 · 隔音 61"
+            },
+            {
+              "label": "两家以上门店用过的标签",
+              "value": "28%",
+              "sub": "上月 21% · 越高越有价值",
+              "tone": "ok"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "门店使用情况（只有计数）",
+          "columns": [
+            {
+              "key": "store",
+              "label": "门店"
+            },
+            {
+              "key": "type",
+              "label": "类型"
+            },
+            {
+              "key": "channel",
+              "label": "主渠道"
+            },
+            {
+              "key": "todo",
+              "label": "本月代办",
+              "align": "right"
+            },
+            {
+              "key": "bad",
+              "label": "差评响应",
+              "align": "right"
+            },
+            {
+              "key": "share",
+              "label": "贡献共享池",
+              "align": "right"
+            },
+            {
+              "key": "active",
+              "label": "最近活跃",
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "store": "君华海逸酒店（本店）",
+              "type": "城市商务",
+              "channel": "携程",
+              "todo": "412",
+              "bad": "86",
+              "share": "41",
+              "active": "今天"
+            },
+            {
+              "store": "三亚湾椰林阁",
+              "type": "海景度假",
+              "channel": "携程 · 飞猪",
+              "todo": "365",
+              "bad": "120",
+              "share": "74",
+              "active": "今天"
+            },
+            {
+              "store": "海口云上商务",
+              "type": "商务",
+              "channel": "协议 · 美团",
+              "todo": "298",
+              "bad": "38",
+              "share": "0",
+              "active": "昨天"
+            },
+            {
+              "store": "琼海田园民宿",
+              "type": "民宿",
+              "channel": "美团",
+              "todo": "176",
+              "bad": "12",
+              "share": "12",
+              "active": "3 天前"
+            },
+            {
+              "store": "儋州半岛之光",
+              "type": "度假",
+              "channel": "携程",
+              "todo": "9",
+              "bad": "0",
+              "share": "0",
+              "active": "16 天前",
+              "rowTone": "warm"
+            }
+          ]
+        },
+        {
+          "type": "banner",
+          "text": "空调类差评标签被 9 家门店用过，其中 5 家的回复话术一致（先致歉 + 当日检修 + 补偿），平均 2.1 天评分回升。建议把这套话术推给刚开业的儋州半岛之光。"
+        },
+        {
+          "type": "note",
+          "text": "集团驾驶舱的前提是「多门店部署 + 共享池」，属于平台层能力，当前系统是单店单体应用，连多店数据模型都没有。这一页现在只能作为产品形态示意。"
+        }
+      ]
+    }
+  }
+}
