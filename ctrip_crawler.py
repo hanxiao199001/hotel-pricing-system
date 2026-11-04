@@ -167,19 +167,23 @@ class RealCtripCrawler:
         return True
 
     def get_my_hotel_data(self) -> Optional[Dict]:
-        """自家酒店数据。
+        """自家酒店数据：来自 eBook 采集（当前价=整晚最低房型价，入住率=eBook 实时）。
 
-        OTA 列表不含自家酒店，无法从采集结果推导，只能取人工配置值。
+        OTA 搜索不含自家酒店，但 eBooking 商家后台能拿到自家经营数据，
+        所以不再依赖 .env 的人工配置。
         """
-        price = self.my_hotel.get("current_price")
-        occupancy = self.my_hotel.get("occupancy_rate")
+        import hotel_metrics
+
+        m = hotel_metrics.resolve()
+        price = m.get("current_price")
+        occupancy = m.get("occupancy_rate")
 
         if price is None or occupancy is None:
             import config as cfg
             raise cfg.ConfigError(
-                "真实模式下必须提供自家酒店的当前价格与入住率"
-                "（MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE）。"
-                "OTA 搜索会把自家酒店排除在结果之外，无法自动获取。"
+                "真实模式下缺少自家酒店的当前价/入住率：请先采集 eBook 经营数据"
+                "（ebook_collector.py 或中台「重新采集经营数据」）。"
+                "本系统不再从 .env 读取 MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE。"
             )
 
         rooms_total = self.my_hotel.get("rooms_total")
@@ -197,8 +201,8 @@ class RealCtripCrawler:
             "rooms_total": int(rooms_total) if rooms_total else None,
             "revenue_today": 0,
         }
-        print(f"  当前价格: ¥{data['current_price']}（人工配置）")
-        print(f"  入住率: {data['occupancy_rate']}%（人工配置）")
+        print(f"  当前价格: ¥{data['current_price']}（eBook 采集）")
+        print(f"  入住率: {data['occupancy_rate']}%（eBook 采集）")
         return data
 
     def get_competitor_hotels(self, city: str, distance_km: float,

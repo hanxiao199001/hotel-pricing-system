@@ -94,13 +94,11 @@ CTRIP_CONFIG = {
     "hotel_id": os.environ.get("CTRIP_HOTEL_ID", "")  # 酒店ID
 }
 
-# 自己酒店。OTA 搜索会把自己当作中心点排除，因此当前价格与入住率
-# 无法从采集结果里获得，必须由人工提供。
+# 自己酒店的基础信息。当前价与入住率不再人工配置：
+# 由 eBooking 经营数据采集提供（见 hotel_metrics.py）。
 MY_HOTEL = {
     "name": (os.environ.get("MY_HOTEL_NAME") or "").strip(),
     "city": (os.environ.get("MY_HOTEL_CITY") or "海口").strip(),
-    "current_price": _opt_float("MY_HOTEL_CURRENT_PRICE"),
-    "occupancy_rate": _opt_float("MY_HOTEL_OCCUPANCY_RATE"),
     "rooms_total": _opt_float("MY_HOTEL_ROOMS_TOTAL"),
 }
 
@@ -144,8 +142,9 @@ SCRAPER_CONFIG = {
 
 # 点评（口碑分析 / 差评预警）
 #
-# 由 D:\TeleAgentWrork\酒店AI\ctrip_hotel_reviews.py 采集产出，只覆盖携程公开点评，
-# 不含美团/飞猪/商家后台，也不含「回复」写权限。
+# 由本项目的 ebook_reviews_collector.py 从携程 eBooking 商家后台「订单点评」
+# 采集产出，覆盖携程/去哪儿/同程/智行全渠道真实点评，只读（不写后台）。
+# 相比原公开点评采集，后台没有的字段（出游类型/IP属地/有用数）留空，不编造。
 #
 # 采集结果写到项目内的 data/reviews/ctrip_reviews.json（不覆盖原始外部快照）；
 # 首次没有新快照时回退读 legacy_path 里的历史文件。
@@ -163,9 +162,10 @@ REVIEWS_CONFIG = {
     "monthly_window": 12,   # 月度趋势展示最近几个月
 
     # 采集脚本与运行环境（脚本依赖 playwright，必须用独立的 venv 解释器）
+    # 从携程 eBooking 后台采集（只读、复用已登录 ebooking 的 profile）。
     "script": os.environ.get(
         "REVIEWS_SCRIPT",
-        r"D:\TeleAgentWrork\酒店AI\ctrip_hotel_reviews.py",
+        os.path.join(_BASE_DIR, "ebook_reviews_collector.py"),
     ),
     "python": os.environ.get(
         "SCRAPER_PYTHON",
@@ -198,7 +198,47 @@ REVIEWS_CONFIG = {
     "before": os.environ.get("REVIEWS_BEFORE", None),
 }
 
-# 房型口碑 → 定价参考（见 room_reputation.py）
+# 携程 eBooking 商家后台 · 经营数据采集（只读）
+#
+# 覆盖系统原来拿不到的经营指标：入住率、出租率、平均卖价 ADR、成交率、
+# 已售房、各房型挂牌价与库存、订单。数据来源是 ebooking 后台登录后的
+# 只读查询接口（经营报告 / 房价房态 / 首页）。
+#
+# 采集脚本跑 playwright，必须用独立的 venv（SCRAPER_PYTHON）执行；
+# profile 需已登录 ebooking（没登录会等 login_wait 秒让人工扫码/验证）。
+# 采集器只监听页面自然发出的只读接口响应，不主动 POST 重放，不写任何后台。
+EBOOK_CONFIG = {
+    "script": os.environ.get(
+        "EBOOK_SCRIPT",
+        os.path.join(_BASE_DIR, "ebook_collector.py"),
+    ),
+    "python": os.environ.get(
+        "SCRAPER_PYTHON",
+        r"D:\TeleAgentWrork\酒店AI\.venv\Scripts\python.exe",
+    ),
+    # 与点评/竞品共用同一个 profile 与调试端口（同一 user-data-dir 不能开两个实例）
+    "profile": os.environ.get(
+        "SCRAPER_PROFILE",
+        r"D:\TeleAgentWrork\酒店AI\profiles\default",
+    ),
+    "channel": os.environ.get("SCRAPER_CHANNEL", "edge"),
+    "cdp_port": int(os.environ.get("EBOOK_CDP_PORT", "9222") or 9222),
+    # 登录/风控等待：需要可见浏览器让人扫码/拖滑块
+    "login_wait": int(os.environ.get("EBOOK_LOGIN_WAIT", "180") or 180),
+    # 每个页面打开后等接口返回的秒数
+    "page_wait": float(os.environ.get("EBOOK_PAGE_WAIT", "8") or 8),
+    "timeout": int(os.environ.get("EBOOK_TIMEOUT", "600") or 600),
+    # 秒退重试：连续两次采集时，上一次浏览器可能还没释放 profile
+    "attempts": int(os.environ.get("EBOOK_ATTEMPTS", "2") or 2),
+    "fast_fail_seconds": 25,
+    # 采集结果落盘路径（最终快照）
+    "path": os.environ.get(
+        "EBOOK_JSON",
+        os.path.join(_BASE_DIR, "data", "ebook", "ctrip_ebook.json"),
+    ),
+}
+
+# 房型口碑 → 定价参考（见 room_reputation.py）（见 room_reputation.py）
 #
 # 这里只影响「判断」，不影响「算价」。建议价仍由 PRICING_STRATEGY 决定，
 # 本组参数回答的是「这一档有没有口碑支撑」以及「要不要留让价缓冲」。
@@ -368,12 +408,11 @@ _REQUIRED_CTRIP_FIELDS = (
     ("hotel_id", "CTRIP_HOTEL_ID"),
 )
 
-# real 模式启动必填项：缺失就无法定价或无法采集
+# real 模式启动必填项：名称用于定位竞品、城市用于搜索。
+# 当前价/入住率已改为从 eBook 采集取，不再要求人工配置。
 _REQUIRED_MY_HOTEL_FIELDS = (
     ("name", "MY_HOTEL_NAME"),
     ("city", "MY_HOTEL_CITY"),
-    ("current_price", "MY_HOTEL_CURRENT_PRICE"),
-    ("occupancy_rate", "MY_HOTEL_OCCUPANCY_RATE"),
 )
 
 
@@ -427,9 +466,8 @@ def validate_startup_config(ctrip_config=None, wechat_config=None, data_source=N
 
     if source == "real":
         hint = (
-            "请在 .env 中填写 MY_HOTEL_NAME / MY_HOTEL_CITY / "
-            "MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE。"
-            "OTA 搜索会把自家酒店排除在结果外，所以当前价格与入住率必须人工提供。"
+            "请在 .env 中填写 MY_HOTEL_NAME / MY_HOTEL_CITY。"
+            "当前价与入住率由 eBook 经营数据采集提供，无需人工填写。"
         )
     else:
         hint = "请在环境变量或 .env 中填写这些值（参考 .env.example）。"

@@ -145,20 +145,31 @@ def test_adapter_handles_missing_fields():
 # ---------------------------------------------------------------------------
 # 真实采集器
 # ---------------------------------------------------------------------------
-def test_real_crawler_requires_manual_price_and_occupancy():
+def test_real_crawler_requires_ebook_metrics(monkeypatch):
+    """不再要求 .env 人工价格/入住率；缺 eBook 采集时才报错。"""
+    import hotel_metrics
     from ctrip_crawler import RealCtripCrawler
 
+    monkeypatch.setattr(
+        hotel_metrics, "resolve",
+        lambda db=None: {"current_price": None, "occupancy_rate": None, "source": None},
+    )
     crawler = RealCtripCrawler({"python": "x", "script": "y"}, {"name": "君华海逸酒店"})
-    with pytest.raises(config.ConfigError, match="MY_HOTEL_CURRENT_PRICE"):
+    with pytest.raises(config.ConfigError, match="eBook"):
         crawler.get_my_hotel_data()
 
 
-def test_real_crawler_builds_my_hotel_data():
+def test_real_crawler_builds_my_hotel_data_from_ebook(monkeypatch):
+    import hotel_metrics
     from ctrip_crawler import RealCtripCrawler
 
+    monkeypatch.setattr(
+        hotel_metrics, "resolve",
+        lambda db=None: {"current_price": 180, "occupancy_rate": 45, "source": "ebook"},
+    )
     crawler = RealCtripCrawler(
         {"python": "x", "script": "y"},
-        {"name": "君华海逸酒店", "current_price": 180, "occupancy_rate": 45, "rooms_total": 50},
+        {"name": "君华海逸酒店", "rooms_total": 50},
     )
     data = crawler.get_my_hotel_data()
     assert data["current_price"] == 180.0

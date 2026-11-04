@@ -202,8 +202,11 @@ def test_review_pages_builder_direct():
 
 
 @needs_snapshot
-def test_status_module_list_marks_snapshot():
+def test_status_module_list_marks_snapshot(monkeypatch):
     """系统状态页的模块清单不能把口碑两页再标成「示例」。"""
+    # reports 可能被本机真实 eBook 快照接管（变成 snapshot）；
+    # 这里模拟没有 eBook 采集，验证它保持示例。
+    monkeypatch.setattr(api.ebook_pages, "_load_snapshot", lambda: None)
     mods = {m["key"]: m for m in api._modules_with_status()}
     for key in ("reviews", "reputation"):
         assert mods[key]["status"] == "snapshot"

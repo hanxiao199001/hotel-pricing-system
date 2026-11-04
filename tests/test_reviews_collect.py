@@ -30,6 +30,12 @@ CFG.update({
 })
 
 
+@pytest.fixture(autouse=True)
+def _isolate_hotel_name(monkeypatch):
+    """样例 payload 固定用「海南君华海逸」，避免受本机 .env 的 MY_HOTEL_NAME 影响。"""
+    monkeypatch.setitem(config.MY_HOTEL, "name", "海南君华海逸")
+
+
 def _payload(status="ok", hotel_name="海南君华海逸", reviews=None, before="2026-11-03"):
     base = {
         "status": status,

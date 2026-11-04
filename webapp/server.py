@@ -55,6 +55,8 @@ _ROUTES = [
     ("POST", re.compile(r"^/api/collect$"), lambda q, m, body: api.start_collect()),
     ("POST", re.compile(r"^/api/reviews/collect$"),
      lambda q, m, body: api.start_reviews_collect()),
+    ("POST", re.compile(r"^/api/ebook/collect$"),
+     lambda q, m, body: api.start_ebook_collect()),
     ("GET", re.compile(r"^/api/replies$"), lambda q, m: api.get_replies(
         theme=q.get("theme", [None])[0],
         status=q.get("status", [None])[0],

@@ -18,11 +18,16 @@ from datetime import datetime
 from typing import Dict, Optional
 
 import config as cfg
+import hotel_metrics
 from algorithm import PricingAlgorithm
 from ctrip_crawler import create_crawler
 from database import PricingDatabase
 from scrapers.runner import ScraperError  # noqa: F401 - 供调用方复用异常类型
 from scrapers.validator import DataValidationError  # noqa: F401
+
+
+def _resolve_source(data_source=None):
+    return (data_source or cfg.DATA_SOURCE or "mock").strip().lower()
 
 
 class WorkflowError(RuntimeError):
@@ -48,21 +53,51 @@ def run_pricing_check(
     log = print if verbose else (lambda *a, **k: None)
 
     cfg.validate_startup_config(data_source=data_source)
+    source = _resolve_source(data_source)
     db = PricingDatabase(cfg.DATABASE["path"])
-    crawler = create_crawler(cfg.CTRIP_CONFIG, data_source)
+    crawler = create_crawler(cfg.CTRIP_CONFIG, source)
     algorithm = PricingAlgorithm(cfg.PRICING_STRATEGY)
 
     # 1. 采集环境
     if not crawler.login():
         raise WorkflowError("携程登录/采集环境检查失败")
 
-    # 2. 自家酒店数据
-    my_data = crawler.get_my_hotel_data()
-    if not my_data:
-        raise WorkflowError("获取酒店数据失败")
-
-    current_price = my_data["current_price"]
-    occupancy_rate = my_data["occupancy_rate"]
+    # 2. 自家酒店数据：real 模式从 eBook 采集取，mock 模式仍用模拟值（测试用）
+    if source == "real":
+        metrics = hotel_metrics.resolve(db)
+        current_price = metrics["current_price"]
+        occupancy_rate = metrics["occupancy_rate"]
+        if current_price is None or occupancy_rate is None:
+            raise WorkflowError(
+                "缺少当前价/入住率：请先采集 eBook 经营数据（ebook_collector.py）。"
+                "本系统已不再从 .env 读取 MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE。"
+            )
+        rooms_total = cfg.MY_HOTEL.get("rooms_total")
+        rooms_available = None
+        if rooms_total:
+            rooms_available = int(round(
+                float(rooms_total) * (1 - float(occupancy_rate) / 100.0)))
+        my_data = {
+            "date": str(datetime.now().date()),
+            "hotel_id": cfg.MY_HOTEL.get("hotel_id"),
+            "hotel_name": cfg.MY_HOTEL.get("name") or "自家酒店",
+            "current_price": round(float(current_price), 2),
+            "occupancy_rate": round(float(occupancy_rate), 2),
+            "rooms_available": rooms_available,
+            "rooms_total": int(rooms_total) if rooms_total else None,
+            "revenue_today": 0,
+            "metrics_source": metrics.get("source"),
+        }
+        log(
+            f"  自家指标来自采集（{metrics.get('source')}）："
+            f"当前价 ¥{current_price:.0f}，入住率 {occupancy_rate:.1f}%"
+        )
+    else:
+        my_data = crawler.get_my_hotel_data()
+        if not my_data:
+            raise WorkflowError("获取酒店数据失败")
+        current_price = my_data["current_price"]
+        occupancy_rate = my_data["occupancy_rate"]
 
     if persist:
         db.save_my_price(

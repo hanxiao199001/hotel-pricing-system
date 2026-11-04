@@ -12,8 +12,8 @@ const PAGES = [
   { key: 'reviews',     group: '口碑', title: '差评预警',       sub: '真实点评归类 · 只读快照', ico: '!', live: false, snapshot: true },
   { key: 'replies',     group: '口碑', title: '差评回复',       sub: '生成草稿 · 人工确认后发布', ico: '✉', live: false, snapshot: true },
   { key: 'reputation',  group: '口碑', title: '口碑分析',       sub: '四维拆解 · 房型与定价',   ico: '❖', live: false, snapshot: true },
-  { key: 'reports',     group: '经营', title: '经营报表',       sub: '周报月报 · 数字对得上账',  ico: '▤', live: false },
-  { key: 'guests',      group: '经营', title: '客源结构',       sub: '客源地 / 渠道 / 复购',    ico: '◈', live: false },
+  { key: 'reports',     group: '经营', title: '经营报表',       sub: '周报月报 · 数字对得上账',  ico: '▤', live: false, snapshot: true },
+  { key: 'guests',      group: '经营', title: '客源结构',       sub: '客源地 / 渠道 / 复购',    ico: '◈', live: false, snapshot: true },
   { key: 'tasks',       group: '协同', title: '办公协同',       sub: '工单排班与跨部门提醒',     ico: '☑', live: false },
   { key: 'group',       group: '集团', title: '集团驾驶舱',     sub: '只看共享池与匿名计数',     ico: '⛭', live: false },
   { key: 'system',      group: '系统', title: '系统状态',       sub: '数据源、文件、采集任务',   ico: '⚙', live: true },
@@ -293,8 +293,8 @@ async function renderOverview(box) {
            ['reputation', '口碑分析',
              rv.available ? `综合 ${num(rv.avg, 2)}` : '—',
              rv.available ? '四维拆解 · 房型定价' : '示例数据'],
-           ['reports', '经营报表', 'RevPAR ¥216', '示例 · 需 PMS 接入'],
-           ['guests', '客源结构', 'OTA 客源 48%', '示例 · 需订单数据'],
+           ['reports', '经营报表', 'ADR / 入住率 / 房型价', 'eBook 采集 · 快照'],
+           ['guests', '客源结构', '客源地 / 渠道 / 画像', 'eBook 采集 · 快照'],
            ['tasks', '办公协同', '12 张工单', '示例 · 需工单系统'],
            ['group', '集团驾驶舱', '12 家门店', '示例 · 需多店部署']]
           .map(([k, t, v, note]) => `<div class="tile" data-go="${k}">
@@ -302,7 +302,7 @@ async function renderOverview(box) {
           </div>`).join('')}
       </div>
       <div class="note" style="margin-top:10px">${rv.available
-        ? `差评、口碑、回复三页已接真实点评快照（截至 ${esc(rv.snapshotDate)}，${Number(rv.kept).toLocaleString('zh-CN')} 条）；其余 4 个模块仍是示例数据。`
+        ? `差评、口碑、回复三页已接真实点评快照（截至 ${esc(rv.snapshotDate)}，${Number(rv.kept).toLocaleString('zh-CN')} 条）；经营报表、客源结构来自 eBook 实时采集；协同与集团驾驶舱仍是示例数据。`
         : '这 7 个模块的数据均为示例数据。'}</div>`);
 
   box.querySelectorAll('[data-go]').forEach((n) => n.addEventListener('click', () => {
@@ -1051,11 +1051,14 @@ async function copyText(text) {
 async function renderStatic(box, key) {
   const m = await apiGet('/api/modules/' + key);
   const isSnapshot = m.source === 'snapshot';
+  const isEbook = key === 'reports' || key === 'guests';
   const bar = isSnapshot
     ? `<div class="srcbar snap">
          <b>历史快照</b>
          <span>${esc(m.statusNote || '数据来自历史采集快照')}</span>
-         <button class="btn" id="btnReviewsCollect" style="margin-left:auto;white-space:nowrap">重新采集点评</button>
+         ${isEbook
+           ? `<button class="btn" id="btnEbookCollect" style="margin-left:auto;white-space:nowrap">重新采集经营数据</button>`
+           : `<button class="btn" id="btnReviewsCollect" style="margin-left:auto;white-space:nowrap">重新采集点评</button>`}
        </div>`
     : `<div class="srcbar">
          <b>示例数据</b>
@@ -1063,8 +1066,10 @@ async function renderStatic(box, key) {
        </div>`;
   box.innerHTML = bar + renderBlocks(m.blocks);
 
-  const btn = $('#btnReviewsCollect');
-  if (btn) btn.addEventListener('click', () => startCollect('reviews'));
+  const btnE = $('#btnEbookCollect');
+  if (btnE) btnE.addEventListener('click', () => startCollect('ebook'));
+  const btnR = $('#btnReviewsCollect');
+  if (btnR) btnR.addEventListener('click', () => startCollect('reviews'));
 }
 
 /* ==========================================================================
@@ -1077,6 +1082,7 @@ async function renderSystem(box) {
   const sc = s.scraper;
   const st = s.strategy;
   const rv = s.reviews || {};
+  const eb = s.ebook || {};
 
   const flag = (ok, text) => `<span class="status-dot ${ok ? 'ok' : 'bad'}"></span> ${esc(text)}`;
 
@@ -1158,7 +1164,20 @@ async function renderSystem(box) {
             <button class="btn" id="btnReviewsCollect2">重新采集点评</button>
             <span class="note">1–3 分钟；会打开可见浏览器</span>
           </div>
-          <div class="note" style="margin-top:8px">采集依赖已登录的 profile。若浏览器停在登录墙或滑块，需要你手动处理，任务最多等 ${esc(rv.timeout || '—')} 秒；超时或失败都不会覆盖已有快照。</div>`)}
+           <div class="note" style="margin-top:8px">采集依赖已登录的 profile。若浏览器停在登录墙或滑块，需要你手动处理，任务最多等 ${esc(rv.timeout || '—')} 秒；超时或失败都不会覆盖已有快照。</div>`)}
+        ${card('eBook 经营数据采集（经营报表的数据源）', `
+          <div class="kv"><span>采集脚本</span><span>${flag(eb.scriptExists, eb.script || '未配置')}</span></div>
+          <div class="kv"><span>解释器（venv）</span><span>${flag(eb.pythonExists, eb.python || '未配置')}</span></div>
+          <div class="kv"><span>浏览器 profile</span><span>${flag(eb.profileExists, eb.profile || '未配置')}</span></div>
+          <div class="kv"><span>当前快照</span><span>${eb.snapshotExists
+            ? `已采集 · 采集于 ${esc(eb.snapshotMtime || '—')}`
+            : '<span class="muted">尚未采集</span>'}</span></div>
+          <div class="mono" style="margin-top:8px;color:var(--muted);word-break:break-all">${esc(eb.snapshot || '—')}</div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="btnEbookCollect2">重新采集经营数据</button>
+            <span class="note">只读 · 约 1–2 分钟；会打开可见浏览器</span>
+          </div>
+          <div class="note" style="margin-top:8px">只监听后台只读接口响应，不主动重放、不写任何后台。需 profile 已登录 ebooking；未登录/停在风控时需手动处理，任务最多等 ${esc(eb.timeout || '—')} 秒，超时或失败都不覆盖已有快照。</div>`)}
         ${card('回复草稿与模型（可选增强）', `
           <div class="kv"><span>草稿总数</span><span>${(s.replies && s.replies.total) || 0} 条</span></div>
           <div class="kv"><span>待确认 / 已采用 / 已弃用</span><span>${(s.replies && s.replies.draft) || 0} / ${(s.replies && s.replies.used) || 0} / ${(s.replies && s.replies.discarded) || 0}</span></div>
@@ -1187,17 +1206,21 @@ async function renderSystem(box) {
   if (b) b.addEventListener('click', () => startCollect('prices'));
   const br = $('#btnReviewsCollect2');
   if (br) br.addEventListener('click', () => startCollect('reviews'));
+  const be = $('#btnEbookCollect2');
+  if (be) be.addEventListener('click', () => startCollect('ebook'));
 }
 
 /* ==========================================================================
    采集任务
    ========================================================================== */
 async function startCollect(kind) {
+  const isEbook = kind === 'ebook';
   const isRev = kind === 'reviews';
-  const btn = isRev ? $('#btnReviewsCollect') : $('#btnCollect');
+  const btn = isRev ? $('#btnReviewsCollect') : (isEbook ? $('#btnEbookCollect') : $('#btnCollect'));
   if (btn) btn.disabled = true;
   try {
-    const job = await apiPost(isRev ? '/api/reviews/collect' : '/api/collect', {});
+    const endpoint = isRev ? '/api/reviews/collect' : (isEbook ? '/api/ebook/collect' : '/api/collect');
+    const job = await apiPost(endpoint, {});
     state.jobId = job.id;
     state.jobKind = kind || 'prices';
     showJobbar(job);
@@ -1211,13 +1234,15 @@ async function startCollect(kind) {
 function showJobbar(job) {
   const bar = $('#jobbar');
   bar.classList.add('show');
+  const isEbook = (job.kind || state.jobKind) === 'ebook';
   const isRev = (job.kind || state.jobKind) === 'reviews';
-  $('#jbTitle').textContent = (isRev ? '点评采集 #' : '采集任务 #') + (job.id || '');
+  $('#jbTitle').textContent = (isRev ? '点评采集 #' : (isEbook ? 'eBook 经营采集 #' : '采集任务 #')) + (job.id || '');
   paintJob(job);
 }
 
 function paintJob(job) {
   const running = job.state === 'running';
+  const isEbook = (job.kind || state.jobKind) === 'ebook';
   const isRev = (job.kind || state.jobKind) === 'reviews';
   $('#jbSpin').style.display = running ? '' : 'none';
   const badge = $('#jbState');
@@ -1228,10 +1253,14 @@ function paintJob(job) {
   if (body) body.scrollTop = body.scrollHeight;
   $('#jbHint').textContent = running
     ? (isRev
-        ? '正在调用携程点评采集脚本。浏览器会自动打开，若停在登录/滑块页请手动处理，通常 1–3 分钟'
-        : '正在调用携程采集脚本，通常需要 30–90 秒')
+      ? '正在调用携程点评采集脚本。浏览器会自动打开，若停在登录/滑块页请手动处理，通常 1–3 分钟'
+      : (isEbook
+        ? '正在调用 eBook 经营数据采集脚本。浏览器会自动打开，若停在登录页请手动处理，通常 1–2 分钟'
+        : '正在调用携程采集脚本，通常需要 30–90 秒'))
     : (job.state === 'done'
-        ? (isRev ? '完成。点评快照已更新，页面指标随之变化' : '完成。数据已写入 pricing.db')
+        ? (isRev ? '完成。点评快照已更新，页面指标随之变化'
+          : isEbook ? '完成。eBook 经营数据已更新，经营报表已刷新'
+          : '完成。数据已写入 pricing.db')
         : ('失败：' + (job.error || '')));
 }
 
@@ -1244,14 +1273,17 @@ function pollJob() {
       if (job.state === 'running') {
         pollJob();
       } else {
+        const isEbook = (job.kind || state.jobKind) === 'ebook';
         const isRev = (job.kind || state.jobKind) === 'reviews';
-        ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2'].forEach((sel) => {
+        ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2', '#btnEbookCollect', '#btnEbookCollect2'].forEach((sel) => {
           const b = $(sel);
           if (b) b.disabled = false;
         });
         toast(
           job.state === 'done'
-            ? (isRev ? '点评采集完成，口碑数据已更新' : '采集完成，数据已更新')
+            ? (isRev ? '点评采集完成，口碑数据已更新'
+              : isEbook ? 'eBook 经营数据采集完成，经营报表已刷新'
+              : '采集完成，数据已更新')
             : '采集失败，展开右下角看日志',
           job.state === 'done' ? 'ok' : 'err'
         );
@@ -1259,7 +1291,7 @@ function pollJob() {
         loadStatus();
       }
     } catch (err) {
-      ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2'].forEach((sel) => {
+      ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2', '#btnEbookCollect', '#btnEbookCollect2'].forEach((sel) => {
         const b = $(sel);
         if (b) b.disabled = false;
       });

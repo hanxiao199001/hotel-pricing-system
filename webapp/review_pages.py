@@ -186,7 +186,11 @@ def _room_pricing_blocks(s, price=None):
 
     base_tier = sig.get("baseTier")
     base = next((p for p in sig["profiles"] if p["tier"] == base_tier), None)
-    base_price = price if price is not None else cfg.MY_HOTEL.get("current_price")
+    base_price = price
+    if base_price is None:
+        import hotel_metrics
+
+        base_price = hotel_metrics.resolve()["current_price"]
 
     rows = []
     for p in sig["profiles"]:

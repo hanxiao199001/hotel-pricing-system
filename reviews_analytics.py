@@ -343,10 +343,10 @@ def summarize(data=None):
         "themes": themes,
         "monthly": monthly,
         "rooms": rooms,
-        "travelTypes": [
+        "travelTypes": ([
             {"label": k, "count": v, "ratio": round(v / total * 100, 1)}
             for k, v in travel.most_common()
-        ],
+        ] if any((r.get("travel_type") or "").strip() for r in reviews) else []),
         "goodMentions": good_mentions,
         "badRows": bad_rows,
         "worst": worst_payload,

@@ -16,10 +16,11 @@ import traceback
 from datetime import datetime
 
 import config as cfg
+import hotel_metrics
 from algorithm import PricingAlgorithm
 from database import DatabasePathError, PricingDatabase
 
-from . import review_pages, static_data
+from . import ebook_pages, review_pages, static_data
 
 _ALGO = PricingAlgorithm(cfg.PRICING_STRATEGY)
 
@@ -215,6 +216,31 @@ def start_reviews_collect():
     return dict(job, log=list(job["log"]))
 
 
+def _run_ebook_collect(job):
+    try:
+        from scrapers import ebook_runner
+
+        result = ebook_runner.collect(log=lambda line: _append_log(job, line))
+        job["hotelId"] = result["hotelId"]
+        job["count"] = result.get("sections") or 0
+        job["state"] = "done"
+    except BaseException as exc:  # noqa: BLE001
+        job["state"] = "failed"
+        job["error"] = str(exc) if isinstance(exc, RuntimeError) else f"{type(exc).__name__}: {exc}"
+        _append_log(job, f"❌ {job['error']}")
+        if os.environ.get("WEBAPP_DEBUG") == "1":
+            job["log"].extend(traceback.format_exc().splitlines())
+    finally:
+        job["finished"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _mark_daily_result("ebook", job)
+
+
+def start_ebook_collect():
+    job = _new_job("ebook")
+    threading.Thread(target=_run_ebook_collect, args=(job,), daemon=True).start()
+    return dict(job, log=list(job["log"]))
+
+
 def get_job(job_id: str):
     job = _jobs.get(str(job_id))
     if job is None:
@@ -265,7 +291,8 @@ def _mark_daily_result(ctype, job):
         ok = job.get("state") == "done"
         detail = (
             (f"{job.get('count')} 家竞品" if ctype == "prices"
-             else f"{job.get('kept')} 条点评")
+             else (f"{job.get('kept')} 条点评" if ctype == "reviews"
+                   else f"{job.get('count')} 个 section"))
             if ok else (job.get("error") or "")[:200]
         )
         get_db().mark_daily_collect(
@@ -288,14 +315,34 @@ def _modules_with_status():
         rv = reviews_analytics.summary_or_none()
     except Exception:  # noqa: BLE001
         rv = None
-    if not rv:
-        return mods
+    # eBooking 经营数据快照：reports 页可用则标记为真实
+    try:
+        ebook_snap = ebook_pages._load_snapshot()
+    except Exception:  # noqa: BLE001
+        ebook_snap = None
     for m in mods:
-        if m["key"] in ("reviews", "reputation"):
+        if m["key"] in ("reviews", "reputation") and rv:
             m["status"] = "snapshot"
             m["statusNote"] = (
                 f"真实点评快照：{rv['snapshot']['kept']} 条携程点评，"
                 f"截至 {rv['snapshot']['dateMax']}"
+            )
+        elif m["key"] == "reports" and ebook_snap and ebook_snap.get("status") == "ok":
+            m["status"] = "snapshot"
+            at = ebook_snap.get("collected_at") or ""
+            m["statusNote"] = "eBook 实时经营数据" + (
+                f"（采集于 {at}）" if at else ""
+            )
+        elif (
+            m["key"] == "guests"
+            and ebook_snap
+            and ebook_snap.get("status") == "ok"
+            and ebook_pages.guest_available(ebook_snap.get("sections") or {})
+        ):
+            m["status"] = "snapshot"
+            at = ebook_snap.get("collected_at") or ""
+            m["statusNote"] = "eBook 客源结构数据" + (
+                f"（采集于 {at}）" if at else ""
             )
     # 回复草稿是本次新增的实装模块，不在 static.json 的示例清单里，单独补一条
     try:
@@ -312,6 +359,18 @@ def _modules_with_status():
     except Exception:  # noqa: BLE001 - 库异常不该让清单消失
         pass
     return mods
+
+
+def _hotel_metrics():
+    """当前价/入住率统一走 eBook 采集（缺失回退库内最近值）。"""
+    m = hotel_metrics.resolve(get_db())
+    return {
+        "name": cfg.MY_HOTEL.get("name") or "（未配置）",
+        "city": cfg.MY_HOTEL.get("city"),
+        "currentPrice": m["current_price"],
+        "occupancyRate": m["occupancy_rate"],
+        "roomsTotal": cfg.MY_HOTEL.get("rooms_total"),
+    }
 
 
 def get_status():
@@ -343,6 +402,13 @@ def get_status():
         reviews_info = {"snapshotExists": False, "error": f"{type(exc).__name__}: {exc}"}
 
     try:
+        from scrapers import ebook_runner
+
+        ebook_info = ebook_runner.snapshot_info()
+    except Exception as exc:  # noqa: BLE001 - eBook 链路坏了不该让状态页挂掉
+        ebook_info = {"snapshotExists": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    try:
         from . import daily as daily_module
 
         daily_info = daily_module.status()
@@ -352,13 +418,7 @@ def get_status():
     return {
         "source": "live",
         "serverTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "hotel": {
-            "name": cfg.MY_HOTEL.get("name") or "（未配置）",
-            "city": cfg.MY_HOTEL.get("city"),
-            "currentPrice": cfg.MY_HOTEL.get("current_price"),
-            "occupancyRate": cfg.MY_HOTEL.get("occupancy_rate"),
-            "roomsTotal": cfg.MY_HOTEL.get("rooms_total"),
-        },
+        "hotel": _hotel_metrics(),
         "dataSource": cfg.DATA_SOURCE,
         "config": _config_check(),
         "database": {
@@ -368,6 +428,7 @@ def get_status():
         },
         "scraper": serialized,
         "reviews": reviews_info,
+        "ebook": ebook_info,
         "daily": daily_info,
         "llm": _llm_status(),
         "replies": get_db().get_reply_stats(),
@@ -395,8 +456,8 @@ def get_radar(date=None):
 
     competitors = db.get_competitors(date)
     prices = [c["price"] for c in competitors]
-    my = db.get_latest_my_price() or {}
-    my_price = my.get("price")
+    m = hotel_metrics.resolve(db)
+    my_price = m["current_price"]
 
     bands = []
     if my_price:
@@ -419,7 +480,7 @@ def get_radar(date=None):
         "date": date,
         "dates": dates,
         "myPrice": my_price,
-        "occupancyRate": my.get("occupancy_rate"),
+        "occupancyRate": m["occupancy_rate"],
         "competitors": competitors,
         "stats": _price_stats(prices),
         "histogram": _histogram(prices),
@@ -445,10 +506,11 @@ def analyze(occupancy_rate=None, price=None, date=None):
 
     prices = [c["price"] for c in radar["competitors"]]
     occ = float(occupancy_rate) if occupancy_rate is not None else (
-        radar.get("occupancyRate") or cfg.MY_HOTEL.get("occupancy_rate") or 45.0
+        radar.get("occupancyRate")
+        if radar.get("occupancyRate") is not None else 45.0
     )
     if price is None or price == "":
-        cur = radar.get("myPrice") or cfg.MY_HOTEL.get("current_price")
+        cur = radar.get("myPrice")
     else:
         cur = price
     if cur is None or cur == "":
@@ -503,12 +565,11 @@ def decide(suggestion_id, decision, note=""):
 
 
 def _current_price():
-    """当前挂牌价：优先用最近一次采集写入库的值，其次用 .env 配置。"""
+    """当前挂牌价：来自 eBook 采集（缺失回退库内最近一次写入）。"""
     try:
-        my = get_db().get_latest_my_price() or {}
+        return hotel_metrics.resolve(get_db())["current_price"]
     except Exception:  # noqa: BLE001 - 库坏了不该让页面挂掉
-        my = {}
-    return my.get("price") or cfg.MY_HOTEL.get("current_price")
+        return None
 
 
 def _room_signal():
@@ -758,6 +819,9 @@ def get_module(key):
     「差评预警」「口碑分析」由点评快照计算；快照缺失时自动退回 static.json，
     页面不会白屏，只是标记回「示例数据」。
     """
+    live = ebook_pages.build(key)
+    if live is not None:
+        return live
     live = review_pages.build(key, price=_current_price())
     if live is not None:
         return live
@@ -781,8 +845,16 @@ def get_overview():
     radar = get_radar()
     empty = radar.get("empty", True)
 
-    my = get_db().get_latest_my_price() or {}
-    my_price = my.get("price") or cfg.MY_HOTEL.get("current_price")
+    metrics = hotel_metrics.resolve(get_db())
+    my_price = metrics["current_price"]
+    occ_value = (
+        metrics["occupancy_rate"] if metrics["occupancy_rate"] is not None else 0
+    )
+    occ_sub = (
+        "eBook 实时入住率 · 与经营报表同源"
+        if metrics["source"] == "ebook"
+        else "最近一次采集入库值"
+    )
     pending = [s for s in get_db().get_suggestions(limit=10) if s.get("status") == "pending"]
 
     static = static_data.load().get("modules", {})
@@ -814,13 +886,13 @@ def get_overview():
         {
             "label": "今日挂牌价",
             "value": f"¥{my_price:.0f}" if my_price else "—",
-            "sub": "配置值 / 最近一次采集写入",
+            "sub": "当前起价（配置/最近采集）· 各房型价见经营报表",
             "source": "live",
         },
         {
             "label": "入住率",
-            "value": f"{(my.get('occupancy_rate') or cfg.MY_HOTEL.get('occupancy_rate') or 0):.0f}%",
-            "sub": "人工填写，决定调价方向",
+            "value": f"{occ_value:.0f}%",
+            "sub": occ_sub,
             "source": "live",
             "tone": "warm",
         },
@@ -845,7 +917,7 @@ def get_overview():
 
     if not empty:
         detail = _ALGO.explain(
-            my.get("occupancy_rate") or cfg.MY_HOTEL.get("occupancy_rate") or 45,
+            occ_value,
             my_price or (radar["stats"]["median"] or 0),
             [c["price"] for c in radar["competitors"]],
         )
