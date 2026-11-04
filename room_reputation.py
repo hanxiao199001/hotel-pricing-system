@@ -76,6 +76,18 @@ def _pct(n, digits=1):
     return round(n, digits) if n is not None else None
 
 
+def _apply_window(summary: dict, months: int) -> dict:
+    """按窗口重算统计。
+
+    实现已归位到 reviews_analytics.apply_window——切窗是统计层的事，
+    房型口碑与差评归因必须共用同一套口径。留在这里会让两边各自切一次、
+    各算一套，页面上就会出现「房型表按近 12 月、归因按全量」的分叉。
+    """
+    import reviews_analytics as ra
+
+    return ra.apply_window(summary, months)
+
+
 def build_profiles(summary: dict) -> list:
     """按档位聚合口碑。
 
@@ -172,7 +184,17 @@ def _judge(profile: dict, overall: dict) -> dict:
     ratio = round(profile["badRate"] / base_rate, 2) if base_rate else None
     avg_delta = round(profile["avg"] - (overall.get("avg") or 0), 2)
 
-    if ratio is not None and ratio <= cfg_room["strong_bad_rate_ratio"]:
+    if ratio is None and base_rate == 0 and profile["bad"]:
+        # 边界：整体零差评时倍数无定义（分母为 0），本档却有差评，
+        # 判「溢价承压」，不能说成「与整体 0% 基本持平」。
+        level = "weak"
+        low, high = cfg_room["weak_hint_range"]
+        hint = (
+            f"整体没有差评，这一档差评率 {profile['badRate']}%，相对更弱；"
+            f"建议在算法价基础上再让 {low}–{high}% 作为缓冲。"
+        )
+        adjust = [-high, -low]
+    elif ratio is not None and ratio <= cfg_room["strong_bad_rate_ratio"]:
         level = "strong"
         hint = (
             f"差评率 {profile['badRate']}%，低于整体 {base_rate}%，"
@@ -224,30 +246,36 @@ def _pick_base_tier(profiles: list) -> tuple:
 def _structure_note(profiles: list, base_tier: str) -> str:
     """档位结构与口碑的关系，一句话。
 
-    只在「有档位差评率明显高于基础档」时才说，否则不硬造结论。
+    两个收紧：
+      1. 只叙述判定为 weak 的档位（差评率 >= 整体 2 倍且样本达标），
+         mixed（持平）不进名单——之前 1.87 倍的「雅致豪华房」也被写成更弱；
+      2. 不再输出「档位越高口碑越弱」——代码没有验证 TIER_ORDER 的单调性，
+         只陈述「哪些档位明显更弱」这个事实本身。
+    依赖调用方先给每个 profile 挂好 p["signal"]（signal() 已保证顺序）。
     """
     by_tier = {p["tier"]: p for p in profiles}
     base = by_tier.get(base_tier)
-    if not base:
+    if not base or not base["badRate"]:
         return ""
-    worse = [
+    weak = [
         p for p in profiles
-        if p["reliable"] and p["tier"] != base_tier and p["badRate"] > base["badRate"]
+        if p["tier"] != base_tier
+        and (p.get("signal") or {}).get("level") == "weak"
     ]
-    if not worse:
+    if not weak:
         return ""
 
-    worse.sort(key=lambda p: -p["badRate"])
-    top = worse[0]
-    ratio = round(top["badRate"] / base["badRate"], 1) if base["badRate"] else None
+    weak.sort(key=lambda p: -p["badRate"])
+    top = weak[0]
+    ratio = round(top["badRate"] / base["badRate"], 1)
     parts = [
-        f"「{top['tier']}」差评率 {top['badRate']}%"
-        + (f"，是基础档「{base_tier}」（{base['badRate']}%）的 {ratio} 倍" if ratio else "")
+        f"「{top['tier']}」差评率 {top['badRate']}%，"
+        f"是基础档「{base_tier}」（{base['badRate']}%）的 {ratio} 倍"
     ]
-    if len(worse) > 1:
-        others = "、".join(f"{p['tier']} {p['badRate']}%" for p in worse[1:3])
+    if len(weak) > 1:
+        others = "、".join(f"{p['tier']} {p['badRate']}%" for p in weak[1:3])
         parts.append(f"另有 {others}")
-    parts.append("档位越高口碑越弱，靠升级房型提价的路径暂时走不通，应先整改再提价")
+    parts.append("这些档位的溢价缺乏口碑支撑，靠升级房型提价暂时走不通，应先整改再提价")
     return "；".join(parts) + "。"
 
 
@@ -264,6 +292,8 @@ def signal(summary: dict = None) -> dict:
     if not summary:
         return {"available": False, "reason": "缺少点评快照"}
 
+    months = int(cfg.ROOM_PRICING.get("window_months") or 0)
+    summary = _apply_window(summary, months)
     overall = summary.get("overall") or {}
     profiles = build_profiles(summary)
     if not profiles:
@@ -291,4 +321,5 @@ def signal(summary: dict = None) -> dict:
         "profiles": profiles,
         "structureNote": _structure_note(profiles, base_tier),
         "minSample": cfg.ROOM_PRICING["min_sample"],
+        "windowMonths": months or None,
     }

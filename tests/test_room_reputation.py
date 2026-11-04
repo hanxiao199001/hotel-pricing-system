@@ -180,3 +180,96 @@ def test_real_snapshot_finds_dominant_tier():
     assert top["tier"] == "豪华客房"
     assert sig["baseTier"] == "豪华客房"
     assert top["count"] > 1000
+
+
+# ---------------------------------------------------------------------------
+# 恒等式：档位聚合并后不丢数据
+# ---------------------------------------------------------------------------
+def test_profiles_conserve_totals(summary):
+    """Σ 分档 count/bad 必须等于整体，否则归并逻辑丢了数据。"""
+    profiles = rr.build_profiles(summary)
+    assert sum(p["count"] for p in profiles) == summary["overall"]["count"]
+    assert sum(p["bad"] for p in profiles) == summary["overall"]["bad"]
+
+
+@pytest.mark.skipif(not _has_snapshot(), reason="没有点评快照")
+def test_real_snapshot_conserve_totals():
+    """在真实快照上复核同一条恒等式。"""
+    import reviews_analytics
+
+    s = reviews_analytics.summarize()
+    profiles = rr.build_profiles(s)
+    assert sum(p["count"] for p in profiles) == s["overall"]["count"]
+    assert sum(p["bad"] for p in profiles) == s["overall"]["bad"]
+
+
+# ---------------------------------------------------------------------------
+# structureNote 收紧：mixed 不进更弱名单
+# ---------------------------------------------------------------------------
+def test_structure_note_ignores_mixed_tier():
+    """与基础档持平（mixed）的档位不进更弱名单，没有 weak 档位时整句不出。"""
+    s = {
+        "overall": {"count": 1000, "avg": 4.8, "bad": 20, "badRate": 2.0},
+        "snapshot": {"dateMax": "2026-11-01", "kept": 1000},
+        "rooms": [
+            {"room": "豪华客房-大床", "count": 900, "avg": 4.9, "bad": 9},
+            {"room": "雅致豪华房-大床", "count": 100, "avg": 4.8, "bad": 3},  # 1.5 倍 → mixed
+        ],
+        "badRows": [],
+    }
+    assert rr.signal(s)["structureNote"] == ""
+
+
+# ---------------------------------------------------------------------------
+# 统计窗口（ROOM_WINDOW_MONTHS）
+# ---------------------------------------------------------------------------
+def test_window_default_zero_keeps_full(monkeypatch):
+    """窗口为 0（默认）时完全不切，行为与改动前一致。"""
+    import reviews_analytics as ra
+
+    monkeypatch.setitem(cfg.ROOM_PRICING, "window_months", 0)
+    reviews = [
+        {"room": "豪华客房-大床", "rating": 5.0, "created_at": "2026-10-01"},
+        {"room": "豪华客房-大床", "rating": 1.0, "created_at": "2023-01-05"},
+    ]
+    monkeypatch.setattr(ra, "load", lambda: {"reviews": reviews})
+    monkeypatch.setattr(ra, "summary_or_none", lambda: ra.summarize({"reviews": reviews}))
+    sig = rr.signal()
+    assert sig["windowMonths"] is None
+    assert sig["overall"]["count"] == 2
+
+
+def test_window_cuts_old_reviews(monkeypatch):
+    """启用窗口后，窗口外的旧差评不再进入统计。"""
+    import reviews_analytics as ra
+
+    reviews = [
+        {"room": "豪华客房-大床", "rating": 5.0, "created_at": "2026-10-01"},
+        {"room": "豪华客房-大床", "rating": 5.0, "created_at": "2025-12-15"},
+        {"room": "豪华客房-大床", "rating": 1.0, "created_at": "2023-01-05"},  # 应被切掉
+    ]
+    monkeypatch.setattr(ra, "load", lambda: {"reviews": reviews})
+    monkeypatch.setattr(ra, "summary_or_none", lambda: ra.summarize({"reviews": reviews}))
+    monkeypatch.setitem(cfg.ROOM_PRICING, "window_months", 12)
+    sig = rr.signal()
+    assert sig["windowMonths"] == 12
+    assert sig["overall"]["count"] == 2   # 2023 年那条不在窗口内
+    assert sig["overall"]["badRate"] == 0.0  # 窗口内没有差评
+
+
+# ---------------------------------------------------------------------------
+# 边界：整体零差评时有差评的档位判 weak，不再误判「持平」
+# ---------------------------------------------------------------------------
+def test_zero_overall_bad_rate_marks_weak():
+    s = {
+        "overall": {"count": 130, "avg": 4.9, "bad": 0, "badRate": 0.0},
+        "snapshot": {"dateMax": "2026-11-01", "kept": 130},
+        "rooms": [
+            {"room": "豪华客房-大床", "count": 90, "avg": 5.0, "bad": 0},
+            {"room": "行政商务房-大床", "count": 40, "avg": 4.5, "bad": 2},
+        ],
+        "badRows": [],
+    }
+    by = {p["tier"]: p["signal"] for p in rr.signal(s)["profiles"]}
+    assert by["行政商务房"]["level"] == "weak"
+    assert by["行政商务房"]["adjustRange"] == [-5, -3]

@@ -63,8 +63,13 @@ def _endpoint(base_url: str) -> str:
     return url + "/chat/completions"
 
 
-def chat(system: str, user: str) -> str:
-    """发一次 chat 请求，返回纯文本。"""
+def chat(system: str, user: str, max_tokens: int = None,
+         temperature: float = None, timeout: float = None) -> str:
+    """发一次 chat 请求，返回纯文本。
+
+    三个 override 参数供不同用途覆盖全局配置：回复草稿要 700 token / 0.4 温度，
+    点评归因要 1600 token / 0.2 温度且超时更短。默认全部走 cfg.LLM_CONFIG。
+    """
     ok, reason = available()
     if not ok:
         raise LLMError(reason)
@@ -76,8 +81,8 @@ def chat(system: str, user: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": conf["temperature"],
-        "max_tokens": conf["max_tokens"],
+        "temperature": conf["temperature"] if temperature is None else temperature,
+        "max_tokens": conf["max_tokens"] if max_tokens is None else max_tokens,
     }
     req = urllib.request.Request(
         _endpoint(conf["base_url"]),
@@ -89,8 +94,9 @@ def chat(system: str, user: str) -> str:
         method="POST",
     )
 
+    wait = conf["timeout"] if timeout is None else timeout
     try:
-        with urllib.request.urlopen(req, timeout=conf["timeout"]) as resp:
+        with urllib.request.urlopen(req, timeout=wait) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -102,7 +108,7 @@ def chat(system: str, user: str) -> str:
     except urllib.error.URLError as exc:
         raise LLMError(f"无法连接 {conf['base_url']}：{exc.reason}") from exc
     except TimeoutError as exc:
-        raise LLMError(f"请求超时（{conf['timeout']} 秒）") from exc
+        raise LLMError(f"请求超时（{wait} 秒）") from exc
 
     try:
         data = json.loads(raw)

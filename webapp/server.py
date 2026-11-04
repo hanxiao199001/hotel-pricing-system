@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config as cfg
 
-from . import api
+from . import api, daily
 from .api import BusyError
 
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -113,6 +113,8 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("POST")
 
     def _dispatch(self, method):
+        # 任何页面/接口访问都唤醒一次每日采集判定（只 set 一个事件，不阻塞请求）
+        daily.maybe_wake()
         parsed = urlparse(self.path)
         path = posixpath.normpath(parsed.path)
         query = parse_qs(parsed.query)
@@ -189,6 +191,13 @@ def serve(host="127.0.0.1", port=8765, open_browser=False):
     print(f"   地址: {url}")
     print(f"   数据: {cfg.DATABASE['path']}")
     print(f"   模式: {cfg.DATA_SOURCE}")
+    if daily.start_watcher():
+        at = cfg.DAILY_COLLECT_CONFIG.get("at", "08:00")
+        print(f"   每日自动采集: 已开启（每天 {at}，或到点后当天首次进入中台触发）")
+        if (cfg.DATA_SOURCE or "").lower() != "real":
+            print("   ⚠️ 当前非 real 模式，每日自动采集会跳过，不会写真实库")
+    else:
+        print("   每日自动采集: 未开启（DAILY_COLLECT_ENABLED=false）")
     print("   Ctrl+C 停止\n")
     if open_browser:
         try:

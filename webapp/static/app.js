@@ -665,6 +665,23 @@ const REPLY_STATUS = {
   discarded: { cls: 'static', text: '已弃用' },
 };
 
+/* 「待处理」= OTA 上还没有商家回复、系统里也没结案（未采用/弃用）的差评。
+   「历史」= 商家已回复且已结案：流程走完了，默认收起，不挤占注意力。 */
+const isPendingReply = (it) => !it.alreadyReplied && it.status === 'draft';
+const isArchivedReply = (it) => !!it.alreadyReplied
+  && (it.status === 'used' || it.status === 'discarded');
+
+/* 按当前状态视图过滤条目（主题过滤在 paintReplyList 里单独做） */
+function scopedReplyItems() {
+  const st = state.replies;
+  const all = st.data.items;
+  const f = st.statusFilter;
+  if (f === 'pending') return all.filter(isPendingReply);
+  if (f === 'used') return all.filter((i) => i.status === 'used');
+  if (f === 'discarded') return all.filter((i) => i.status === 'discarded');
+  return all;
+}
+
 async function renderReplies(box) {
   const d = await apiGet('/api/replies');
   if (!d.available) {
@@ -672,7 +689,10 @@ async function renderReplies(box) {
     return;
   }
 
-  state.replies = { data: d, filter: 'all', expanded: false };
+  state.replies = {
+    data: d, statusFilter: 'pending', themeFilter: 'all',
+    expanded: false, archiveExpanded: false,
+  };
 
   const llmBar = d.llm.available
     ? `<span class="badge live"><i></i>模型可用 · ${esc(d.llm.model)}</span>`
@@ -688,18 +708,22 @@ async function renderReplies(box) {
     </span>
   </div>`;
 
+  const pendingCount = d.items.filter(isPendingReply).length;
   const kpis = [
     { label: '差评总数', value: `${d.badTotal} 条`, sub: `快照 ${esc(d.snapshotDate)}`, tone: 'warm' },
     { label: '已采用', value: `${d.stats.used} 条`, sub: '已发布到平台', tone: d.stats.used ? 'ok' : '' },
     { label: '已弃用', value: `${d.stats.discarded} 条`, sub: '决定不回复' },
-    { label: '待处理', value: `${d.badTotal - d.stats.used - d.stats.discarded} 条`,
-      sub: `已落库 ${d.stats.savedTotal} 条草稿`, tone: 'warm' },
+    { label: '待处理', value: `${pendingCount} 条`,
+      sub: `OTA 未回复 · 已落库 ${d.stats.savedTotal} 条草稿`, tone: 'warm' },
   ];
 
   box.innerHTML = srcBar + kpiGrid(kpis)
     + `<div class="card" style="margin-bottom:16px">
-         <div class="card-head"><b class="card-title">按主题筛</b>
-           <span class="card-meta">一条差评可命中多个主题</span></div>
+         <div class="card-head"><b class="card-title">按状态筛</b>
+           <span class="card-meta">「待处理」= OTA 未回复且未结案，默认显示</span></div>
+         <div class="chips" id="replyStatusFilters"></div>
+         <div class="card-head" style="margin-top:12px"><b class="card-title">按主题筛</b>
+           <span class="card-meta">一条差评可命中多个主题 · 计数跟随当前状态视图</span></div>
          <div class="chips" id="replyFilters"></div>
          <div class="note" style="margin-top:10px">${d.llm.available
            ? '「AI 重写」会调用已配置的模型；输出若没有预留整改占位符会被拒绝并回退模板。'
@@ -708,32 +732,65 @@ async function renderReplies(box) {
        <div id="replyList"></div>`;
 
   paintReplyList();
-  paintReplyFilters();
+  paintReplyStatusFilters();
+  paintReplyThemeFilters();
 
   const btn = $('#btnRepliesCollect');
   if (btn) btn.addEventListener('click', () => startCollect('reviews'));
   bindReplyActions(box);
 }
 
-function paintReplyFilters() {
+function paintReplyStatusFilters() {
   const st = state.replies;
-  if (!st) return;
+  const box = $('#replyStatusFilters');
+  if (!st || !box) return;
+  const items = st.data.items;
+  const counts = {
+    all: items.length,
+    pending: items.filter(isPendingReply).length,
+    used: items.filter((i) => i.status === 'used').length,
+    discarded: items.filter((i) => i.status === 'discarded').length,
+  };
+  const defs = [
+    { key: 'all', label: '全部' },
+    { key: 'pending', label: '待处理' },
+    { key: 'used', label: '已采用' },
+    { key: 'discarded', label: '已弃用' },
+  ];
+  box.innerHTML = defs.map((f) => `
+    <button class="chip ${st.statusFilter === f.key ? 'on' : ''}" data-status-filter="${f.key}">
+      ${esc(f.label)} <b>${counts[f.key]}</b></button>`).join('');
+
+  box.querySelectorAll('[data-status-filter]').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.replies.statusFilter = b.dataset.statusFilter;
+      state.replies.expanded = false;
+      paintReplyStatusFilters();
+      paintReplyThemeFilters();
+      paintReplyList();
+    });
+  });
+}
+
+function paintReplyThemeFilters() {
+  const st = state.replies;
   const box = $('#replyFilters');
-  if (!box) return;
-  const counts = { all: st.data.items.length };
-  st.data.items.forEach((i) => i.themes.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
+  if (!st || !box) return;
+  const scoped = scopedReplyItems();
+  const counts = { all: scoped.length };
+  scoped.forEach((i) => i.themes.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
   const keys = ['all'].concat(st.data.themeCounts.map((t) => t.label));
   box.innerHTML = keys.map((k) => {
     const label = k === 'all' ? '全部' : k;
-    const active = st.filter === k;
+    const active = st.themeFilter === k;
     return `<button class="chip ${active ? 'on' : ''}" data-filter="${esc(k)}">
       ${esc(label)} <b>${counts[k] || 0}</b></button>`;
   }).join('');
 
   box.querySelectorAll('[data-filter]').forEach((b) => {
     b.addEventListener('click', () => {
-      state.replies.filter = b.dataset.filter;
-      paintReplyFilters();
+      state.replies.themeFilter = b.dataset.filter;
+      state.replies.expanded = false;
       paintReplyList();
     });
   });
@@ -744,12 +801,18 @@ function paintReplyList() {
   const list = $('#replyList');
   if (!st || !list) return;
 
-  const items = st.filter === 'all'
-    ? st.data.items
-    : st.data.items.filter((i) => i.themes.includes(st.filter));
+  let items = scopedReplyItems();
+  if (st.themeFilter !== 'all') items = items.filter((i) => i.themes.includes(st.themeFilter));
 
-  if (!items.length) {
-    list.innerHTML = '<div class="card"><div class="empty"><b>这个主题下没有差评</b>换一个筛选看看。</div></div>';
+  // 「全部」视图：商家已回复且已结案（已采用/弃用）的归入历史区，默认收起
+  let archived = [];
+  if (st.statusFilter === 'all') {
+    archived = items.filter(isArchivedReply);
+    items = items.filter((i) => !isArchivedReply(i));
+  }
+
+  if (!items.length && !archived.length) {
+    list.innerHTML = `<div class="card"><div class="empty"><b>${esc(replyEmptyTitle())}</b>${esc(replyEmptyHint())}</div></div>`;
     return;
   }
 
@@ -760,6 +823,14 @@ function paintReplyList() {
     + (more > 0
       ? `<div class="row" style="justify-content:center;margin:4px 0 16px">
            <button class="btn" id="btnMoreReplies">还有 ${more} 条，全部展开</button></div>`
+      : '')
+    + (archived.length
+      ? (st.archiveExpanded
+        ? `<div class="row" style="justify-content:center;margin:4px 0 8px">
+             <button class="btn" id="btnReplyArchive">收起历史（已回复并结案 ${archived.length} 条）</button></div>`
+          + archived.map(replyCard).join('')
+        : `<div class="row" style="justify-content:center;margin:4px 0 16px">
+             <button class="btn" id="btnReplyArchive">已回复并结案 ${archived.length} 条 · 展开查看</button></div>`)
       : '');
 
   const moreBtn = $('#btnMoreReplies');
@@ -770,7 +841,31 @@ function paintReplyList() {
       bindReplyActions($('#content'));
     });
   }
+  const archiveBtn = $('#btnReplyArchive');
+  if (archiveBtn) {
+    archiveBtn.addEventListener('click', () => {
+      state.replies.archiveExpanded = !state.replies.archiveExpanded;
+      paintReplyList();
+    });
+  }
   autoGrowReplyTexts();
+}
+
+function replyEmptyTitle() {
+  const st = state.replies;
+  if (st.statusFilter === 'pending') return '没有待处理的差评';
+  if (st.statusFilter === 'used') return '还没有标记为「已采用」的草稿';
+  if (st.statusFilter === 'discarded') return '还没有「已弃用」的草稿';
+  if (st.themeFilter !== 'all') return '这个状态与主题的组合下没有差评';
+  return '这个主题下没有差评';
+}
+
+function replyEmptyHint() {
+  const st = state.replies;
+  if (st.statusFilter === 'pending') return 'OTA 未回复且未结案的差评为 0。切到「全部」可查看已回复与已结案的记录。';
+  if (st.statusFilter === 'used') return '复制草稿到携程商家后台发出后，回来点「标记已采用」就会出现在这里。';
+  if (st.statusFilter === 'discarded') return '决定不回复的草稿点「弃用」后归档在这里。';
+  return '换一个筛选看看。';
 }
 
 /** 草稿正文都在 textarea 里，固定高度会截断内容——按实际内容撑开。 */
@@ -790,9 +885,15 @@ async function syncReplyStats() {
     if (nums.length < 4) return;
     nums[1].textContent = `${d.stats.used} 条`;
     nums[2].textContent = `${d.stats.discarded} 条`;
-    nums[3].textContent = `${d.badTotal - d.stats.used - d.stats.discarded} 条`;
-    if (subs.length >= 4) subs[3].textContent = `已落库 ${d.stats.savedTotal} 条草稿`;
-    if (state.replies) state.replies.data.stats = d.stats;
+    nums[3].textContent = `${d.items.filter(isPendingReply).length} 条`;
+    if (subs.length >= 4) subs[3].textContent = `OTA 未回复 · 已落库 ${d.stats.savedTotal} 条草稿`;
+    if (state.replies) {
+      /* 条目也要同步：切状态/主题筛选、历史折叠区都依赖最新的标记状态 */
+      state.replies.data.items = d.items;
+      state.replies.data.stats = d.stats;
+      paintReplyStatusFilters();
+      paintReplyThemeFilters();
+    }
   } catch (e) { /* 计数同步失败不该打断操作 */ }
 }
 
@@ -821,6 +922,7 @@ function replyCard(it) {
       <span class="muted mono">${esc(it.date)}</span>
       <span class="muted">${esc(it.roomTier || it.room || '房型未标注')}</span>
       ${it.themes.map((t) => `<span class="badge">${esc(t)}</span>`).join('')}
+      ${it.alreadyReplied ? '<span class="badge static" title="这条点评在 OTA 上已有商家回复，无需再写">商家已回复</span>' : ''}
       <span class="reply-src mono" data-src>${it.source === 'llm' ? 'AI' : '模板'}</span>
       <span class="badge ${s.cls}" data-status>${s.text}</span>
     </div>
@@ -978,6 +1080,15 @@ async function renderSystem(box) {
 
   const flag = (ok, text) => `<span class="status-dot ${ok ? 'ok' : 'bad'}"></span> ${esc(text)}`;
 
+  const d = s.daily || {};
+  const dailyCell = (t) => {
+    if (!d.enabled) return '<span class="muted">未开启</span>';
+    if (!t) return '<span class="muted">今天还没有记录</span>';
+    if (t.status === 'done' || t.done) return flag(true, `今日已采${t.detail ? '（' + esc(t.detail) + '）' : ''}${t.updatedAt ? ' · ' + esc(String(t.updatedAt).slice(11)) : ''}`);
+    if (t.status === 'failed') return flag(false, `今日第 ${t.attempts} 次尝试失败${t.detail ? ' · ' + esc(t.detail).slice(0, 80) : ''}`);
+    return '<span class="muted">今天还没有记录</span>';
+  };
+
   const jobs = (s.jobs || []).map((j) => `
     <div class="link-row">
       <span class="lk">#${esc(j.id)} · ${esc(j.started)}</span>
@@ -1011,6 +1122,7 @@ async function renderSystem(box) {
         <div class="kv"><span>price_suggestions</span><span>${c.price_suggestions} 条</span></div>
         <div class="kv"><span>price_adjustments</span><span>${c.price_adjustments} 条</span></div>
         <div class="kv"><span>reply_drafts</span><span>${(s.replies && s.replies.total) || 0} 条</span></div>
+        <div class="kv"><span>daily_collects</span><span>${c.daily_collects != null ? c.daily_collects + ' 条' : '—'}</span></div>
         <div class="note" style="margin-top:10px">price_adjustments 建库起一直是空的，因为「建议模式」缺人工确认入口；现在在「调价建议」页点确认就会写入。</div>
       </div>
     </div>
@@ -1022,6 +1134,15 @@ async function renderSystem(box) {
 
     <div class="grid c2">
       <div style="display:flex;flex-direction:column;gap:16px">
+        ${card('每日自动采集', `
+          <div class="kv"><span>机制</span><span>${d.enabled
+            ? `每天 ${esc(d.at)} 自动执行；到点后当天首次进入中台会立即触发；当天已采过（含手动）不再重复`
+            : '未开启（.env 设 DAILY_COLLECT_ENABLED=true 恢复）'}</span></div>
+          <div class="kv"><span>价格数据</span><span>${dailyCell(d.prices)}</span></div>
+          <div class="kv"><span>点评数据</span><span>${dailyCell(d.reviews)}</span></div>
+          ${d.skipReason ? `<div class="note">当前为 ${esc(d.dataSource)} 模式：${esc(d.skipReason)}。</div>` : ''}
+          ${d.error ? `<div class="note">读取每日采集状态失败：${esc(d.error)}</div>` : ''}
+          <div class="note">失败当天不自动重试，可点下方「立即采集」手动补采；判重记录在 daily_collects 表，重启中台不会重复采。</div>`)}
         ${card('价格采集', jobs + `<div class="row" style="margin-top:12px"><button class="btn primary" id="btnCollect2">立即采集一次</button>
           <span class="note">约 30–90 秒；跑完自动刷新数据</span></div>`)}
         ${card('点评采集（口碑 / 差评两页的数据源）', `

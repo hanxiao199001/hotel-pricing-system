@@ -11,6 +11,7 @@
 """
 import os
 import sys
+from datetime import time as _clock_time
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV_PATH = os.path.join(_BASE_DIR, ".env")
@@ -215,6 +216,12 @@ ROOM_PRICING = {
     # 不会自动并入建议价——调价仍需人工拍板。
     "weak_hint_range": [3, 5],
 
+    # 统计窗口：只统计快照内最近 N 个自然月（基准取快照最新日期，不取今天），
+    # 避免多年前的旧差评拖累当前判定。0 = 全量（默认，行为与历史一致）。
+    # 启用后样本量会变小，部分档位可能跌破 min_sample 而判「样本不足」——
+    # 这是设计使然：宁可少表态，不用旧数据猜。
+    "window_months": int(os.environ.get("ROOM_WINDOW_MONTHS", "0") or 0),
+
     # 起价对应哪一档。留空则自动取点评量最大的一档
     # （OTA 最低价房型通常就是基础房型，点评也最多）。
     "base_tier": (os.environ.get("MY_HOTEL_BASE_ROOM_TIER") or "").strip(),
@@ -234,6 +241,33 @@ LLM_CONFIG = {
     "timeout": int(os.environ.get("LLM_TIMEOUT", "60") or 60),
     "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "700") or 700),
     "temperature": float(os.environ.get("LLM_TEMPERATURE", "0.4") or 0.4),
+}
+
+# 点评归因的模型层（可选）。
+#
+# 与上面的「差评回复草稿」是两个用途，边界也不同：
+#   - 统计数字和「硬件 vs 服务」的归因结论仍然由 reviews_analytics 算，
+#     模型只负责把差评聚成「整改动作」级别的问题、给整改建议；
+#   - 每条依据都要能对上点评原文，对不上就丢弃（见 reviews_llm._validate）；
+#   - 没配 key / 超时 / 输出不合规 → 页面回退到规则文案，功能照常。
+#
+# 结果按 (快照路径, mtime, size, 模型名, prompt 版本) 落盘缓存。
+# 这是可复现性的来源：同一份快照永远同一份结论，不会刷一次页面变一次。
+REVIEWS_LLM_CONFIG = {
+    "enabled": os.environ.get("REVIEWS_LLM_ENABLED", "true").lower() == "true",
+    "cache": os.environ.get(
+        "REVIEWS_LLM_CACHE",
+        os.path.join(_BASE_DIR, "data", "cache", "reviews_llm.json"),
+    ),
+    # 归因要稳定，温度压到 0.2；配合缓存后同一份快照输出完全一致
+    "temperature": float(os.environ.get("REVIEWS_LLM_TEMPERATURE", "0.2") or 0.2),
+    # 输出是结构化 JSON，比回复草稿长。实测 1600 token 只能写 1300 字左右，
+    # 4 个问题各带 3 条依据就会被截断；3000 留足余量。
+    "max_tokens": int(os.environ.get("REVIEWS_LLM_MAX_TOKENS", "3000") or 3000),
+    # 页面首次生成是同步调用，超时设短一点，宁可这次不出结论也别把页面卡死
+    "timeout": int(os.environ.get("REVIEWS_LLM_TIMEOUT", "25") or 25),
+    # 全量 1975 条里只有 30 条差评，全部喂得下；上限只为防快照变大
+    "max_bad_samples": int(os.environ.get("REVIEWS_LLM_MAX_SAMPLES", "40") or 40),
 }
 
 # 定价策略
@@ -288,6 +322,39 @@ SCHEDULE_CONFIG = {
     "check_interval_hours": 1,  # 每小时检查一次
     "auto_adjust": False        # 建议模式（手动确认）
 }
+
+
+def _parse_hhmm(value):
+    """解析 "HH:MM" 形式的每日时点。格式错误启动即报错——
+    定时点写错不该静默用默认值，否则机制会在错误的时间段悄悄跑。"""
+    raw = (value or "").strip()
+    try:
+        hh, mm = raw.split(":")
+        return _clock_time(int(hh), int(mm))
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(
+            f"DAILY_COLLECT_AT={value!r} 不是合法的 HH:MM（示例：08:00）。"
+        ) from exc
+
+
+# 每日自动采集（webapp 内置，实现见 webapp/daily.py）
+#
+# 语义：每天价格、点评各自动采集一次，统一不早于 DAILY_COLLECT_AT：
+#   - 中台开着没人动 → 到点自动执行（8 点后中台才启动的，启动后
+#     poll_seconds 内补采当天这次）；
+#   - 到点之后当天首次有人进入中台 → 立即触发。
+# 判重记录在 daily_collects 表（含手动「立即采集」），当天采过不再重复。
+# DATA_SOURCE=mock 自动跳过，避免把模拟数据写进真实库。
+# 默认 max_attempts=1：自动尝试失败当天不重试——频控、登录失效都需要
+# 人工判断，盲目重试只会加剧限流；次日自动重新开始。
+DAILY_COLLECT_CONFIG = {
+    "enabled": os.environ.get("DAILY_COLLECT_ENABLED", "true").lower() == "true",
+    "at": (os.environ.get("DAILY_COLLECT_AT", "08:00") or "08:00").strip(),
+    "poll_seconds": int(os.environ.get("DAILY_COLLECT_POLL_SECONDS", "30") or 30),
+    "max_attempts": int(os.environ.get("DAILY_COLLECT_MAX_ATTEMPTS", "1") or 1),
+    "cooldown_minutes": int(os.environ.get("DAILY_COLLECT_COOLDOWN_MINUTES", "60") or 60),
+}
+DAILY_COLLECT_CONFIG["at_time"] = _parse_hhmm(DAILY_COLLECT_CONFIG["at"])
 
 # 数据库（默认放在项目目录下，可用环境变量覆盖）
 DATABASE = {

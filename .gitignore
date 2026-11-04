@@ -28,5 +28,11 @@ htmlcov/
 # 点评采集的中间文件（成功后会被原子替换掉，失败时可能残留）
 data/reviews/*.collecting.json
 
+# 模型归因缓存（随快照重新生成，别人的模型输出不提交）
+data/cache/
+
 # 临时工作文件（画图中间产物等）
 .temp/
+
+# WorkBuddy 工作区数据
+.workbuddy/

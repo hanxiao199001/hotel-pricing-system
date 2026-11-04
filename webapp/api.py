@@ -11,6 +11,7 @@ import io
 import os
 import statistics
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -151,6 +152,7 @@ def _run_collect(job):
             job["log"].extend(traceback.format_exc().splitlines())
     finally:
         job["finished"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _mark_daily_result("prices", job)
 
 
 def _new_job(kind):
@@ -204,6 +206,7 @@ def _run_reviews_collect(job):
             job["log"].extend(traceback.format_exc().splitlines())
     finally:
         job["finished"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _mark_daily_result("reviews", job)
 
 
 def start_reviews_collect():
@@ -224,6 +227,53 @@ def list_jobs():
         {k: v for k, v in j.items() if k != "log"}
         for j in sorted(_jobs.values(), key=lambda x: int(x["id"]), reverse=True)
     ]
+
+
+def has_running_job() -> bool:
+    """有没有采集任务在跑。每日自动采集用它决定让不让位。"""
+    with _jobs_lock:
+        return any(j["state"] == "running" for j in _jobs.values())
+
+
+def wait_job(job_id, timeout, poll=2.0):
+    """等一个任务离开 running 状态。
+
+    返回最终 state；超过 timeout 返回 "timeout"（任务可能仍在跑，
+    交给它自己的超时机制收尾，这里只放弃等待）。供每日采集链使用。
+    """
+    deadline = time.time() + float(timeout)
+    while True:
+        with _jobs_lock:
+            job = _jobs.get(str(job_id))
+            state = job["state"] if job else "missing"
+        if state != "running":
+            return state
+        if time.time() >= deadline:
+            return "timeout"
+        time.sleep(poll)
+
+
+def _mark_daily_result(ctype, job):
+    """任务结束时把结果写进 daily_collects（手动点按钮与每日自动链共用）。
+
+    两边都走这里，「当天已采过」的判重口径才一致：手动采成功后，
+    当天的自动任务直接跳过，不会到点再采一遍。写失败不抛——
+    记录写不进去不该影响采集本身，但会打印到终端，不静默。
+    """
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        ok = job.get("state") == "done"
+        detail = (
+            (f"{job.get('count')} 家竞品" if ctype == "prices"
+             else f"{job.get('kept')} 条点评")
+            if ok else (job.get("error") or "")[:200]
+        )
+        get_db().mark_daily_collect(
+            ctype, today, "done" if ok else "failed",
+            job_id=str(job.get("id")), detail=detail,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[每日采集] ⚠️ 写入每日记录失败：{type(exc).__name__}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +317,8 @@ def _modules_with_status():
 def get_status():
     db = get_db()
     counts = {}
-    for table in ("my_hotel_prices", "competitor_prices", "price_suggestions", "price_adjustments"):
+    for table in ("my_hotel_prices", "competitor_prices", "price_suggestions",
+                  "price_adjustments", "daily_collects"):
         try:
             counts[table] = db._rows(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]
         except Exception:  # noqa: BLE001
@@ -291,6 +342,13 @@ def get_status():
     except Exception as exc:  # noqa: BLE001 - 点评链路坏了不该让状态页挂掉
         reviews_info = {"snapshotExists": False, "error": f"{type(exc).__name__}: {exc}"}
 
+    try:
+        from . import daily as daily_module
+
+        daily_info = daily_module.status()
+    except Exception as exc:  # noqa: BLE001
+        daily_info = {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+
     return {
         "source": "live",
         "serverTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -310,6 +368,7 @@ def get_status():
         },
         "scraper": serialized,
         "reviews": reviews_info,
+        "daily": daily_info,
         "llm": _llm_status(),
         "replies": get_db().get_reply_stats(),
         "strategy": cfg.PRICING_STRATEGY,
@@ -675,7 +734,20 @@ def save_reply_text(key, text):
 
 
 def set_reply_status(key, status, note=""):
-    saved = get_db().set_reply_draft_status(key, status, note=note or None)
+    """标记草稿状态（draft / used / discarded）。
+
+    页面上的模板稿是现场算的、不落库，所以「标记已采用/弃用」可能是这条
+    点评第一次写库：记录不存在时先落一份当前模板稿再标状态，
+    否则对没生成过的差评直接标记会一直 400。
+    """
+    db = get_db()
+    try:
+        saved = db.set_reply_draft_status(key, status, note=note or None)
+    except ValueError:
+        if status not in ("draft", "used", "discarded"):
+            raise
+        generate_reply(key, prefer_llm=False)
+        saved = db.set_reply_draft_status(key, status, note=note or None)
     return {"ok": True, "draft": {"key": key, "status": saved["status"],
                                   "note": saved.get("note")}}
 

@@ -145,6 +145,28 @@ class PricingDatabase:
             "CREATE INDEX IF NOT EXISTS ix_reply_drafts_status ON reply_drafts(status)"
         )
 
+        # 每日自动采集的执行记录（判重的唯一事实源，不靠进程内存）
+        #   (collect_type, date) 唯一：价格/点评各一行。
+        #   status: done = 当天已采到数据；failed = 尝试过但失败
+        #   attempts 只统计「自动」尝试；手动「立即采集」成功同样写 done，
+        #   让当天自动任务跳过，但不占用自动重试的次数额度。
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_collects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collect_type TEXT NOT NULL,
+            date DATE NOT NULL,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            job_id TEXT,
+            detail TEXT,
+            updated_at TIMESTAMP
+        )
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_daily_collects_type_date "
+            "ON daily_collects(collect_type, date)"
+        )
+
         self._dedupe_and_add_unique_indexes(cursor, conn)
         self._ensure_decision_columns(cursor, conn)
 
@@ -343,6 +365,64 @@ class PricingDatabase:
                 "SELECT DISTINCT date FROM competitor_prices ORDER BY date DESC"
             )
         ]
+
+    def mark_daily_collect(self, collect_type, date_str, status, *, job_id=None,
+                           detail=None, count_attempt=False):
+        """记录/更新某类数据在某天的采集结果（幂等 upsert）。
+
+        count_attempt=True 只在每日自动采集的执行链里用：attempts 只统计
+        自动尝试，手动「立即采集」不占用自动重试的次数额度。
+        updated_at 写本地时间，与任务列表的 started/finished 同口径
+        （不用 SQLite 的 CURRENT_TIMESTAMP，那是 UTC，冷却间隔会算错 8 小时）。
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO daily_collects
+                    (collect_type, date, status, attempts, job_id, detail, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(collect_type, date) DO UPDATE SET
+                    status = excluded.status,
+                    attempts = attempts + excluded.attempts,
+                    job_id = excluded.job_id,
+                    detail = excluded.detail,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    collect_type, date_str, status,
+                    1 if count_attempt else 0, job_id, detail,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            conn.commit()
+            return self.get_daily_collects(date_str).get(collect_type)
+        finally:
+            conn.close()
+
+    def get_daily_collects(self, date_str) -> Dict[str, Dict]:
+        """某天的每日采集记录，形如 {"prices": {...}, "reviews": {...}}。
+
+        没有记录的类型不出现在返回里，调用方用 .get() 取。
+        """
+        rows = self._rows(
+            "SELECT collect_type, status, attempts, job_id, detail, updated_at "
+            "FROM daily_collects WHERE date = ?",
+            (date_str,),
+        )
+        out = {}
+        for r in rows:
+            out[r["collect_type"]] = {
+                "type": r["collect_type"],
+                "date": date_str,
+                "status": r["status"],
+                "attempts": r["attempts"] or 0,
+                "jobId": r["job_id"],
+                "detail": r["detail"],
+                "updatedAt": r["updated_at"],
+            }
+        return out
 
     def get_competitors(self, date: Optional[str] = None) -> List[Dict]:
         """某日的竞品明细；不传日期则取最新一天。"""

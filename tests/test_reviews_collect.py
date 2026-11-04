@@ -195,7 +195,9 @@ def _wait_job(job_id, timeout=5.0):
     raise AssertionError("任务没有在预期时间内结束")
 
 
-def test_reviews_job_runs_and_reports(stub_collect):
+def test_reviews_job_runs_and_reports(stub_collect, empty_db):
+    # empty_db：_run_reviews_collect 结束时会写每日记录（daily_collects），
+    # 不隔离会写进真实 pricing.db（实测泄漏过一次）
     job = api.start_reviews_collect()
     assert job["kind"] == "reviews"
     done = _wait_job(job["id"])
@@ -204,7 +206,7 @@ def test_reviews_job_runs_and_reports(stub_collect):
     assert any("翻页" in line for line in done["log"])
 
 
-def test_reviews_job_failure_is_reported(monkeypatch):
+def test_reviews_job_failure_is_reported(monkeypatch, empty_db):
     def boom(**_kwargs):
         raise reviews_runner.ReviewsCollectError("携程要求登录或验证")
 
@@ -215,7 +217,7 @@ def test_reviews_job_failure_is_reported(monkeypatch):
     assert "登录" in done["error"]
 
 
-def test_only_one_job_at_a_time(monkeypatch):
+def test_only_one_job_at_a_time(monkeypatch, empty_db):
     """同一时刻只允许一个采集任务，价格采集与点评采集共用一个锁。"""
     import threading
 
@@ -321,8 +323,12 @@ def test_non_fast_failure_is_not_retried(monkeypatch, tmp_path):
     assert calls["n"] == 1
 
 
-def test_price_job_still_runs_after_job_refactor(monkeypatch):
-    """价格采集与点评采集共用建任务逻辑，重构后价格链路必须照常。"""
+def test_price_job_still_runs_after_job_refactor(monkeypatch, empty_db):
+    """价格采集与点评采集共用建任务逻辑，重构后价格链路必须照常。
+
+    empty_db：价格任务结束会写每日记录，不隔离会写进真实 pricing.db
+    （本用例曾经把假「done」泄漏进生产库，让当天自动采集误判已采）。
+    """
     import pipeline
 
     monkeypatch.setattr(

@@ -321,6 +321,10 @@ def summarize(data=None):
             "totalCount": total_count,
             "collected": int(data.get("collected") or len(reviews)),
             "kept": int(data.get("kept") or len(reviews)),
+            # 翻页元数据：用来向用户解释「为什么不是 100%」——
+            # 站内总数与列表接口可翻页数是携程自己的两个口径，不是采集漏了。
+            "pageCount": int(data.get("page_count") or 0),
+            "pageSize": int(data.get("page_size") or 0),
             "coverage": round(len(reviews) / total_count * 100, 1) if total_count else None,
         },
         "overall": {
@@ -348,6 +352,119 @@ def summarize(data=None):
         "worst": worst_payload,
         "thresholds": {"badRating": bad_max, "goodRating": good_min},
     }
+
+
+# ---------------------------------------------------------------------------
+# 归因：短板落在硬件还是服务
+# ---------------------------------------------------------------------------
+# 这两个问题以前是写死一句话回答的（"口碑短板在硬件而非服务"）。但实测
+# 1975 条快照发现这句话并不总成立：全量口径硬件 31 次、服务 11 次（2.82 倍），
+# 切到近 6 个月却变成 2:2 打平，第一主题直接是「服务态度」——写死的结论会和
+# 页面上的主题排序自相矛盾。所以改成分档判定，宁可说"样本不足"也不硬下结论。
+HARDWARE_THEMES = ("设施老旧", "卫生异味", "隔音噪音", "泳池健身")
+SERVICE_THEMES = ("服务态度",)
+
+# 任一族提及数低于此值就不下结论。差评全量只有 30 条，切到近 6 个月只剩 4 条，
+# 在 4 条上判断"短板在哪"等于抛硬币。门槛取 5 与 ROOM_PRICING.min_sample(30)
+# 同一套思路：宁可少表态。注意这里的分母是"提及数"，天然比点评条数多。
+ATTRIBUTION_MIN_MENTIONS = 5
+
+# 差距达到 2 倍才算"显著偏向某一侧"，与 ROOM_PRICING.weak_bad_rate_ratio 同口径：
+# 5 分制里 4.90 与 4.85 是噪声，2 倍的提及差距才值得动作。
+ATTRIBUTION_STRONG_RATIO = 2.0
+
+
+def apply_window(summary: dict, months: int) -> dict:
+    """把统计切到「快照内最近 N 个自然月」，纯函数、不改原 dict。
+
+    基准取快照内最新一条点评的月份，不取今天——快照是历史切片，
+    用「今天」当基准会在快照变旧时把窗口错位到没数据的月份。
+    months <= 0 或窗口覆盖全部数据时不切，行为与历史版本完全一致。
+
+    幂等：对已切过窗的 summary 再调一次会直接返回（dateMin 已 >= cutoff）。
+    """
+    if not months or months <= 0:
+        return summary
+    snap = summary.get("snapshot") or {}
+    latest = snap.get("dateMax") or ""
+    if not latest:
+        return summary
+    # 含最新月在内的最近 N 个自然月：2026-10 往前 12 个月 → cutoff = 2025-11
+    idx = int(latest[:4]) * 12 + int(latest[5:7]) - months
+    if idx < 0:
+        return summary
+    cutoff = f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+    if snap.get("dateMin", "")[:7] >= cutoff:
+        return summary  # 窗口已覆盖全部数据，无需重算
+
+    try:
+        data = load()
+    except ReviewsUnavailable:
+        return summary  # 原始快照读不到时退回已算好的全量统计
+    filtered = [
+        r for r in data.get("reviews", [])
+        if isinstance(r, dict) and (r.get("created_at") or "")[:7] >= cutoff
+    ]
+    if not filtered:
+        return summary  # 窗口内没有数据，不硬造空结论
+    return summarize({"reviews": filtered})
+
+
+def attribution(summary: dict) -> dict:
+    """判断差评短板落在硬件还是服务。纯函数，只读 summary，不产生文案。
+
+    verdict 取值：
+      hardware     —— 硬件类提及数显著多于服务类
+      service      —— 服务类显著多于硬件类
+      mixed        —— 两类相当，不足以归因到单一环节
+      insufficient —— 至少一侧样本不足，不下结论
+      none         —— 没有可归因的差评
+
+    口径说明：计数用的是"提及数"而非"点评条数"。一条差评同时提到设施老旧
+    和服务态度时两侧各计一次，这正是想要的——归因看的是某类问题被提到的
+    频次，不是点评条数。
+    """
+    themes = summary.get("themes") or []
+    mentions = {t["label"]: t["count"] for t in themes}
+    hard = sum(mentions.get(k, 0) for k in HARDWARE_THEMES)
+    soft = sum(mentions.get(k, 0) for k in SERVICE_THEMES)
+    bad_total = (summary.get("overall") or {}).get("bad") or 0
+
+    base = {
+        "hardware": hard,
+        "service": soft,
+        "badTotal": bad_total,
+        "minMentions": ATTRIBUTION_MIN_MENTIONS,
+        "strongRatio": ATTRIBUTION_STRONG_RATIO,
+    }
+
+    if not bad_total or (hard == 0 and soft == 0):
+        return {**base, "verdict": "none", "ratio": None,
+                "weakSide": None, "weakCount": 0}
+
+    # 一侧为零时倍数无定义（分母为 0）。单独处理，不能写成"0 倍"或"持平"。
+    if soft == 0 and hard >= ATTRIBUTION_MIN_MENTIONS:
+        return {**base, "verdict": "hardware", "ratio": None,
+                "weakSide": "hardware", "weakCount": hard}
+    if hard == 0 and soft >= ATTRIBUTION_MIN_MENTIONS:
+        return {**base, "verdict": "service", "ratio": None,
+                "weakSide": "service", "weakCount": soft}
+
+    if min(hard, soft) < ATTRIBUTION_MIN_MENTIONS:
+        return {**base, "verdict": "insufficient", "ratio": None,
+                "weakSide": None, "weakCount": 0}
+
+    if hard >= soft:
+        ratio, side, weak = round(hard / soft, 2), "hardware", hard
+    else:
+        ratio, side, weak = round(soft / hard, 2), "service", soft
+
+    if ratio < ATTRIBUTION_STRONG_RATIO:
+        return {**base, "verdict": "mixed", "ratio": ratio,
+                "weakSide": None, "weakCount": 0}
+
+    return {**base, "verdict": side, "ratio": ratio,
+            "weakSide": side, "weakCount": weak}
 
 
 def summary_or_none():
