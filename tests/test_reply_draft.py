@@ -6,7 +6,7 @@
 """
 import pytest
 
-import reply_draft as rd
+import app.reviews.reply_draft as rd
 
 
 def _row(**kw):
@@ -174,7 +174,7 @@ def test_build_all_skips_empty_and_respects_limit():
 def test_real_snapshot_drafts_are_usable():
     import os
 
-    import reviews_analytics
+    import app.reviews.analytics as reviews_analytics
 
     if not os.path.isfile(reviews_analytics.snapshot_path()):
         pytest.skip("没有点评快照")

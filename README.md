@@ -196,30 +196,47 @@ scrapers/
 
 ```
 hotel-pricing-system/
-├── pipeline.py          # ★ 询价工作流（唯一实现）：采集→校验→算价→落库
-├── main.py              # 命令行入口：调 workflow + 打印报告 + 发通知
-├── run_webapp.py        # 中台入口：起 HTTP 服务
-├── config.py            # 配置（.env 加载、数据源、采集参数、定价策略）
-├── database.py          # 数据库模块（SQLite，含幂等写入与人工拍板）
-├── algorithm.py         # 定价算法（calculate_optimal_price / explain）
-├── ctrip_crawler.py     # 采集器：模拟实现 + 真实实现
-├── scrapers/            # 真实采集层（runner / validator / adapters）
-├── reviews_analytics.py # ★ 点评快照统计（口碑两页的计算层，纯函数）
-├── room_reputation.py   # ★ 房型归一化 + 房型口碑 → 定价信号
-├── reply_draft.py       # ★ 差评回复草稿（模板引擎，零依赖离线可用）
-├── llm.py               # 可选的大模型调用（OpenAI 兼容，标准库 urllib）
-├── data/reviews/        # 点评采集结果（运行时生成，原子替换）
-├── webapp/              # 中台
-│   ├── server.py        #   stdlib HTTP 服务（静态文件 + JSON 路由）
-│   ├── api.py           #   接口层：真实数据 + 算法中间量 + 拍板 + 回复草稿
-│   ├── review_pages.py  #   点评统计 → 口碑/差评两页的 block（含房型定价区块）
-│   ├── static_data.py   #   静态示例数据读取
-│   ├── data/static.json #   仍未实现的模块示例数据（block schema）
-│   └── static/          #   index.html / app.css / app.js
-├── tests/               # pytest 测试
-├── pricing.db           # SQLite 数据库（运行后生成）
+├── main.py                  # 命令行入口：调 workflow + 打印报告 + 发通知
+├── run_webapp.py            # 中台入口：起 HTTP 服务
+├── app/                     # 核心业务包
+│   ├── config.py            #   配置（.env 加载、数据源、采集参数、定价策略）
+│   ├── database.py          #   数据库模块（SQLite，含幂等写入与人工拍板）
+│   ├── pricing/             #   定价域
+│   │   ├── algorithm.py     #     定价算法（calculate_optimal_price / explain）
+│   │   ├── pipeline.py      #     ★ 询价工作流（唯一实现）：采集→校验→算价→落库
+│   │   └── hotel_metrics.py #     eBook 经营指标解析（当前价 / 入住率）
+│   └── reviews/             #   点评域
+│       ├── analytics.py     #     ★ 点评快照统计（口碑两页的计算层，纯函数）
+│       ├── reputation.py    #     ★ 房型归一化 + 房型口碑 → 定价信号
+│       ├── reply_draft.py   #     ★ 差评回复草稿（模板引擎，零依赖离线可用）
+│       └── llm.py           #     点评归因模型聚类（可选）
+├── collectors/              # 采集器
+│   ├── ctrip_crawler.py     #   采集器：模拟实现 + 真实实现
+│   ├── ebook_collector.py   #   eBook 经营数据采集脚本（独立 venv 运行）
+│   └── ebook_reviews_collector.py  #  点评采集脚本（独立 venv 运行）
+├── scrapers/                # 真实采集层（runner / validator / adapters / ebook_runner / reviews_runner）
+├── infra/                   # 基础设施
+│   ├── llm.py               #   可选的大模型调用（OpenAI 兼容，标准库 urllib）
+│   ├── notifier.py          #   通知模块
+│   └── send_whatsapp.py     #   WhatsApp 发送脚本
+├── data/reviews/            # 点评采集结果（运行时生成，原子替换）
+├── docs/                    # 流程图、安全待办等文档
+├── webapp/                  # 中台
+│   ├── server.py            #   stdlib HTTP 服务（静态文件 + JSON 路由）
+│   ├── api.py               #   接口层：真实数据 + 算法中间量 + 拍板 + 回复草稿
+│   ├── review_pages.py      #   点评统计 → 口碑/差评两页的 block（含房型定价区块）
+│   ├── static_data.py       #   静态示例数据读取
+│   ├── data/static.json     #   仍未实现的模块示例数据（block schema）
+│   └── static/              #   index.html / app.css / app.js
+├── tests/                   # pytest 测试
+├── pricing.db               # SQLite 数据库（运行后生成）
 └── README.md
 ```
+
+> 说明：业务模块按「定价域 / 点评域」收进 `app/` 包，跨模块引用统一走
+> `from app.xxx import ...`；采集脚本（依赖独立 venv + playwright）归到
+> `collectors/`，通知/大模型等基础设施归到 `infra/`。根目录只保留两个入口
+> `main.py` 与 `run_webapp.py`。
 
 ### 为什么把工作流抽成 pipeline
 
@@ -284,7 +301,7 @@ hotel-pricing-system/
 
 ```bash
 # 命令行跑一次
-.venv\Scripts\python.exe ebook_collector.py --out data/ebook/ctrip_ebook.json
+.venv\Scripts\python.exe collectors/ebook_collector.py --out data/ebook/ctrip_ebook.json
 
 # 或中台触发
 curl -X POST http://127.0.0.1:8765/api/ebook/collect
@@ -446,7 +463,7 @@ curl -X POST http://127.0.0.1:8765/api/reviews/collect
 采集完想立刻生成（不必等页面首次访问，避免那一次同步等待）：
 
 ```bash
-python -m reviews_llm
+python -m app.reviews.llm
 ```
 
 ### 差评回复：生成草稿，但不替你发布

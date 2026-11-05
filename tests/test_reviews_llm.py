@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-import config as cfg
-import llm
-import reviews_llm as rl
+import app.config as cfg
+import infra.llm as llm
+import app.reviews.llm as rl
 from webapp import review_pages as rp
 
 

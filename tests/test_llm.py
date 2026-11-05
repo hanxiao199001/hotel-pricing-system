@@ -9,8 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-import config as cfg
-import llm
+import app.config as cfg
+import infra.llm as llm
 
 GOOD_REPLY = (
     "尊敬的客人，您好：\n\n"

@@ -16,7 +16,7 @@ import re
 import urllib.error
 import urllib.request
 
-import config as cfg
+from app import config as cfg
 
 
 class LLMError(RuntimeError):

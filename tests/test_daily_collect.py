@@ -9,7 +9,7 @@ from datetime import date, datetime, time as dtime, timedelta
 
 import pytest
 
-import config as cfg
+import app.config as cfg
 from webapp import api, daily
 
 AT = dtime(8, 0)

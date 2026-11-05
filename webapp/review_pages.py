@@ -6,10 +6,10 @@
 """
 from . import static_data
 
-import config as cfg
-import reviews_analytics
-import reviews_llm
-import room_reputation
+from app import config as cfg
+from app.reviews import analytics as reviews_analytics
+from app.reviews import llm as reviews_llm
+from app.reviews import reputation as room_reputation
 
 
 def _fmt(n, digits=0):
@@ -188,7 +188,7 @@ def _room_pricing_blocks(s, price=None):
     base = next((p for p in sig["profiles"] if p["tier"] == base_tier), None)
     base_price = price
     if base_price is None:
-        import hotel_metrics
+        from app.pricing import hotel_metrics
 
         base_price = hotel_metrics.resolve()["current_price"]
 

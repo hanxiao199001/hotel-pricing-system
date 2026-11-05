@@ -5,15 +5,16 @@ import pytest
 
 
 @pytest.mark.parametrize("mod", [
-    "config", "algorithm", "database", "ctrip_crawler", "notifier",
+    "app.config", "app.pricing.algorithm", "app.database",
+    "collectors.ctrip_crawler", "infra.notifier",
 ])
 def test_modules_importable(mod):
     importlib.import_module(mod)
 
 
 def _algo():
-    from algorithm import PricingAlgorithm
-    import config
+    from app.pricing.algorithm import PricingAlgorithm
+    import app.config as config
     return PricingAlgorithm(config.PRICING_STRATEGY)
 
 
@@ -69,7 +70,7 @@ def test_market_position():
 
 
 def test_database_init_and_save(tmp_path):
-    from database import PricingDatabase
+    from app.database import PricingDatabase
     db = PricingDatabase(str(tmp_path / "test.db"))
     db.save_my_price(date="2026-08-28", price=128.0, occupancy_rate=45.0,
                      rooms_available=20, rooms_total=50)
@@ -83,7 +84,7 @@ def test_database_upsert_is_idempotent(tmp_path):
     """
     import sqlite3
 
-    from database import PricingDatabase
+    from app.database import PricingDatabase
 
     db = PricingDatabase(str(tmp_path / "test.db"))
     date = "2026-11-02"
@@ -128,7 +129,7 @@ def test_database_dedupes_existing_rows_on_init(tmp_path):
     """老库若已有重复行，初始化时应自动清理，否则唯一索引建不上。"""
     import sqlite3
 
-    from database import PricingDatabase
+    from app.database import PricingDatabase
 
     path = str(tmp_path / "legacy.db")
     db = PricingDatabase(path)

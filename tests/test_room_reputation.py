@@ -7,8 +7,8 @@ import os
 
 import pytest
 
-import config as cfg
-import room_reputation as rr
+import app.config as cfg
+import app.reviews.reputation as rr
 
 
 @pytest.fixture
@@ -147,7 +147,7 @@ def test_min_sample_threshold_respected(summary, monkeypatch):
 
 
 def test_signal_without_snapshot(monkeypatch):
-    import reviews_analytics
+    import app.reviews.analytics as reviews_analytics
 
     monkeypatch.setattr(reviews_analytics, "summary_or_none", lambda: None)
     sig = rr.signal(None)
@@ -164,14 +164,14 @@ def test_empty_rooms_returns_unavailable():
 # 真实快照（存在才跑）
 # ---------------------------------------------------------------------------
 def _has_snapshot():
-    import reviews_analytics
+    import app.reviews.analytics as reviews_analytics
 
     return os.path.isfile(reviews_analytics.snapshot_path())
 
 
 @pytest.mark.skipif(not _has_snapshot(), reason="没有点评快照")
 def test_real_snapshot_finds_dominant_tier():
-    import reviews_analytics
+    import app.reviews.analytics as reviews_analytics
 
     sig = rr.signal(reviews_analytics.summarize())
     assert sig["available"] is True
@@ -195,7 +195,7 @@ def test_profiles_conserve_totals(summary):
 @pytest.mark.skipif(not _has_snapshot(), reason="没有点评快照")
 def test_real_snapshot_conserve_totals():
     """在真实快照上复核同一条恒等式。"""
-    import reviews_analytics
+    import app.reviews.analytics as reviews_analytics
 
     s = reviews_analytics.summarize()
     profiles = rr.build_profiles(s)
@@ -225,7 +225,7 @@ def test_structure_note_ignores_mixed_tier():
 # ---------------------------------------------------------------------------
 def test_window_default_zero_keeps_full(monkeypatch):
     """窗口为 0（默认）时完全不切，行为与改动前一致。"""
-    import reviews_analytics as ra
+    import app.reviews.analytics as ra
 
     monkeypatch.setitem(cfg.ROOM_PRICING, "window_months", 0)
     reviews = [
@@ -241,7 +241,7 @@ def test_window_default_zero_keeps_full(monkeypatch):
 
 def test_window_cuts_old_reviews(monkeypatch):
     """启用窗口后，窗口外的旧差评不再进入统计。"""
-    import reviews_analytics as ra
+    import app.reviews.analytics as ra
 
     reviews = [
         {"room": "豪华客房-大床", "rating": 5.0, "created_at": "2026-10-01"},

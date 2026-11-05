@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from database import PricingDatabase
+from app.database import PricingDatabase
 from webapp import api, static_data
 
 

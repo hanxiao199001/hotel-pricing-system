@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-import reviews_analytics
+import app.reviews.analytics as reviews_analytics
 from webapp import api, review_pages
 
 REAL_SNAPSHOT = os.path.isfile(reviews_analytics.snapshot_path())

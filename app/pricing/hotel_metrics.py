@@ -12,7 +12,7 @@ import json
 import os
 from datetime import date
 
-import config as cfg
+from app import config as cfg
 
 _ROOM_MARKERS = ("钟点", "小时")
 

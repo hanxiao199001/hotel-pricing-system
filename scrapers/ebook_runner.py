@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime
 
-import config as cfg
+from app import config as cfg
 
 
 class EbookCollectError(RuntimeError):

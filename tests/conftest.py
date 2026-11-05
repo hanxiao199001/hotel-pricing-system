@@ -6,7 +6,7 @@ import pytest
 # 将项目根目录加入 sys.path，便于直接 import 各模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config
+import app.config as config
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +36,7 @@ def empty_db(tmp_path, monkeypatch):
 
     给草稿、口碑这类用例用——它们依赖的是点评快照而不是竞品价格表。
     """
-    from database import PricingDatabase
+    from app.database import PricingDatabase
     from webapp import api
 
     db = PricingDatabase(str(tmp_path / "empty.db"))

@@ -7,8 +7,8 @@ import statistics
 
 import pytest
 
-import config
-from algorithm import PricingAlgorithm
+import app.config as config
+from app.pricing.algorithm import PricingAlgorithm
 
 
 @pytest.fixture

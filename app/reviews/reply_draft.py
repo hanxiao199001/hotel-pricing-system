@@ -18,7 +18,7 @@ LLM 增强在 llm.py，本模块不依赖任何外部服务，离线可用。
 import hashlib
 import re
 
-import room_reputation
+from app.reviews import reputation as room_reputation
 
 # 每个主题三段：承认问题 / 建议的整改动作（作为占位符示例）/ 后续保障
 _THEME_COPY = {

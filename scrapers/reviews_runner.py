@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
-import config as cfg
+from app import config as cfg
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
@@ -332,7 +332,7 @@ def collect(hotel: str = "", city: str = "", log=_log_noop, cfg_dict=None) -> di
 def snapshot_info(cfg_dict=None) -> dict:
     """给状态页用：脚本/解释器/profile/快照是否就绪。"""
     cfg_dict = cfg_dict or cfg.REVIEWS_CONFIG
-    import reviews_analytics
+    from app.reviews import analytics as reviews_analytics
 
     path = reviews_analytics.snapshot_path()
     info = {

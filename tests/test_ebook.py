@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-import config
+import app.config as config
 from scrapers import ebook_runner
 from webapp import ebook_pages
 

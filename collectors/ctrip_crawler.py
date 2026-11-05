@@ -172,14 +172,14 @@ class RealCtripCrawler:
         OTA 搜索不含自家酒店，但 eBooking 商家后台能拿到自家经营数据，
         所以不再依赖 .env 的人工配置。
         """
-        import hotel_metrics
+        from app.pricing import hotel_metrics
 
         m = hotel_metrics.resolve()
         price = m.get("current_price")
         occupancy = m.get("occupancy_rate")
 
         if price is None or occupancy is None:
-            import config as cfg
+            from app import config as cfg
             raise cfg.ConfigError(
                 "真实模式下缺少自家酒店的当前价/入住率：请先采集 eBook 经营数据"
                 "（ebook_collector.py 或中台「重新采集经营数据」）。"
@@ -215,7 +215,7 @@ class RealCtripCrawler:
         """
         place = self.my_hotel.get("name") or ""
         if not place:
-            import config as cfg
+            from app import config as cfg
             raise cfg.ConfigError("真实模式需要 MY_HOTEL_NAME 作为采集中心点。")
 
         checkin = checkin or str(datetime.now().date())
@@ -266,11 +266,11 @@ class RealCtripCrawler:
 def create_crawler(config: Dict, data_source: Optional[str] = None):
     """按 config.DATA_SOURCE 创建采集器：real = 真实脚本，mock = 模拟数据。"""
     if data_source is None:
-        import config as cfg
+        from app import config as cfg
         data_source = cfg.DATA_SOURCE
 
     if (data_source or "mock").strip().lower() == "real":
-        import config as cfg
+        from app import config as cfg
         return RealCtripCrawler(cfg.SCRAPER_CONFIG, cfg.MY_HOTEL, cfg.COMPETITOR_FILTER)
 
     return CtripCrawler(

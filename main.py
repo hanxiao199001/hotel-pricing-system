@@ -8,10 +8,10 @@
 import sys
 from datetime import datetime
 
-import config as cfg
-import pipeline
-from database import DatabasePathError
-from pipeline import WorkflowError
+from app import config as cfg
+from app.database import DatabasePathError
+from app.pricing import pipeline
+from app.pricing.pipeline import WorkflowError
 from scrapers.runner import ScraperError
 from scrapers.validator import DataValidationError
 

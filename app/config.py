@@ -13,7 +13,9 @@ import os
 import sys
 from datetime import time as _clock_time
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 项目根目录 = 本文件（app/config.py）的上级目录。所有路径（.env、data/、
+# 采集脚本、pricing.db）都相对项目根目录推导，与启动目录无关。
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ENV_PATH = os.path.join(_BASE_DIR, ".env")
 
 # 记录 .env 的加载方式，便于启动失败时诊断
@@ -165,7 +167,7 @@ REVIEWS_CONFIG = {
     # 从携程 eBooking 后台采集（只读、复用已登录 ebooking 的 profile）。
     "script": os.environ.get(
         "REVIEWS_SCRIPT",
-        os.path.join(_BASE_DIR, "ebook_reviews_collector.py"),
+        os.path.join(_BASE_DIR, "collectors", "ebook_reviews_collector.py"),
     ),
     "python": os.environ.get(
         "SCRAPER_PYTHON",
@@ -210,7 +212,7 @@ REVIEWS_CONFIG = {
 EBOOK_CONFIG = {
     "script": os.environ.get(
         "EBOOK_SCRIPT",
-        os.path.join(_BASE_DIR, "ebook_collector.py"),
+        os.path.join(_BASE_DIR, "collectors", "ebook_collector.py"),
     ),
     "python": os.environ.get(
         "SCRAPER_PYTHON",

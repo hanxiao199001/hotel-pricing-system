@@ -20,7 +20,7 @@
 """
 import collections
 
-import config as cfg
+from app import config as cfg
 
 # 档位优先级：靠前先匹配。顺序有讲究——
 # 「豪华套房」要落进套房而不是豪华客房，「雅致豪华房」要落进雅致而不是豪华客房。
@@ -83,7 +83,7 @@ def _apply_window(summary: dict, months: int) -> dict:
     房型口碑与差评归因必须共用同一套口径。留在这里会让两边各自切一次、
     各算一套，页面上就会出现「房型表按近 12 月、归因按全量」的分叉。
     """
-    import reviews_analytics as ra
+    from app.reviews import analytics as ra
 
     return ra.apply_window(summary, months)
 
@@ -286,7 +286,7 @@ def signal(summary: dict = None) -> dict:
     不会被自动并入建议价——调价必须由人拍板，这一点和现有流程一致。
     """
     if summary is None:
-        import reviews_analytics
+        from app.reviews import analytics as reviews_analytics
 
         summary = reviews_analytics.summary_or_none()
     if not summary:

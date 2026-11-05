@@ -17,11 +17,11 @@ CLI 负责打印、中台负责展示，计算口径天然一致。
 from datetime import datetime
 from typing import Dict, Optional
 
-import config as cfg
-import hotel_metrics
-from algorithm import PricingAlgorithm
-from ctrip_crawler import create_crawler
-from database import PricingDatabase
+from app import config as cfg
+from app.database import PricingDatabase
+from app.pricing import hotel_metrics
+from app.pricing.algorithm import PricingAlgorithm
+from collectors.ctrip_crawler import create_crawler
 from scrapers.runner import ScraperError  # noqa: F401 - 供调用方复用异常类型
 from scrapers.validator import DataValidationError  # noqa: F401
 

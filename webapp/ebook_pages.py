@@ -10,7 +10,7 @@ from datetime import date
 
 from . import static_data
 
-import config as cfg
+from app import config as cfg
 
 
 def _fmt(n, digits=0):

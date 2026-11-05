@@ -18,7 +18,7 @@ import re
 import statistics
 from datetime import datetime, timedelta
 
-import config as cfg
+from app import config as cfg
 
 # 差评主题归类。关键词是「包含即命中」的朴素匹配，不做分词——
 # 点评里同一件事的说法很集中（老旧/霉味/早餐），朴素匹配足够用，

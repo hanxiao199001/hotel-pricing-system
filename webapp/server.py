@@ -14,7 +14,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-import config as cfg
+from app import config as cfg
 
 from . import api, daily
 from .api import BusyError

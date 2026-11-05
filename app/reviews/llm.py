@@ -23,9 +23,9 @@ import re
 import threading
 from datetime import datetime
 
-import config as cfg
-import llm
-import reviews_analytics as ra
+from app import config as cfg
+from app.reviews import analytics as ra
+from infra import llm
 
 # 改了 prompt 或输出结构就改这个版本号，旧缓存自动失效
 PROMPT_VERSION = "v1"

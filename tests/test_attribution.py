@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-import reviews_analytics as ra
+import app.reviews.analytics as ra
 from webapp import review_pages as rp
 
 

@@ -23,7 +23,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
-import config as cfg
+from app import config as cfg
 
 from . import api
 

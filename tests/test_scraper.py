@@ -4,7 +4,7 @@
 """
 import pytest
 
-import config
+import app.config as config
 from scrapers import adapters
 from scrapers.runner import ScraperError, build_command, run_scraper
 from scrapers.validator import DataValidationError, validate_result
@@ -147,8 +147,8 @@ def test_adapter_handles_missing_fields():
 # ---------------------------------------------------------------------------
 def test_real_crawler_requires_ebook_metrics(monkeypatch):
     """不再要求 .env 人工价格/入住率；缺 eBook 采集时才报错。"""
-    import hotel_metrics
-    from ctrip_crawler import RealCtripCrawler
+    import app.pricing.hotel_metrics as hotel_metrics
+    from collectors.ctrip_crawler import RealCtripCrawler
 
     monkeypatch.setattr(
         hotel_metrics, "resolve",
@@ -160,8 +160,8 @@ def test_real_crawler_requires_ebook_metrics(monkeypatch):
 
 
 def test_real_crawler_builds_my_hotel_data_from_ebook(monkeypatch):
-    import hotel_metrics
-    from ctrip_crawler import RealCtripCrawler
+    import app.pricing.hotel_metrics as hotel_metrics
+    from collectors.ctrip_crawler import RealCtripCrawler
 
     monkeypatch.setattr(
         hotel_metrics, "resolve",
@@ -178,7 +178,7 @@ def test_real_crawler_builds_my_hotel_data_from_ebook(monkeypatch):
 
 
 def test_real_crawler_returns_competitors_with_km(monkeypatch):
-    import ctrip_crawler
+    import collectors.ctrip_crawler as ctrip_crawler
 
     raw = _result([
         _hotel("海口朗廷酒店", 697.0, distance=390.0),
@@ -199,7 +199,7 @@ def test_real_crawler_returns_competitors_with_km(monkeypatch):
 
 def test_real_crawler_does_not_filter_by_price(monkeypatch):
     """价格区间只在 mock 模式用于生成随机值；真实模式不能拿它过滤，否则会清空。"""
-    import ctrip_crawler
+    import collectors.ctrip_crawler as ctrip_crawler
 
     raw = _result([_hotel("海口朗廷酒店", 697.0), _hotel("荷泰海景酒店", 173.0)])
     monkeypatch.setattr(ctrip_crawler, "run_scraper", lambda *a, **k: raw)

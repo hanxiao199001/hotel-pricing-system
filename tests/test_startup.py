@@ -1,8 +1,8 @@
 """启动配置检查：必填环境变量缺失或为空时必须失败，且不能进入爬虫。"""
 import pytest
 
-import config
-from config import ConfigError, validate_startup_config
+import app.config as config
+from app.config import ConfigError, validate_startup_config
 
 VALID_CTRIP = {
     "username": "user",
@@ -52,7 +52,7 @@ def test_complete_config_passes():
 
 def test_main_exits_before_scraper_when_config_missing(monkeypatch, capsys):
     import main
-    import pipeline
+    import app.pricing.pipeline as pipeline
 
     monkeypatch.setattr(
         config,
@@ -95,7 +95,7 @@ def test_main_runs_check_when_config_present(monkeypatch):
 
 def test_run_pricing_check_rejects_empty_credentials(monkeypatch):
     import main
-    import pipeline
+    import app.pricing.pipeline as pipeline
 
     monkeypatch.setattr(
         config,

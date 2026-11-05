@@ -9,8 +9,8 @@ import time
 
 import pytest
 
-import config
-import reviews_analytics
+import app.config as config
+import app.reviews.analytics as reviews_analytics
 from scrapers import reviews_runner
 from webapp import api
 
@@ -335,7 +335,7 @@ def test_price_job_still_runs_after_job_refactor(monkeypatch, empty_db):
     empty_db：价格任务结束会写每日记录，不隔离会写进真实 pricing.db
     （本用例曾经把假「done」泄漏进生产库，让当天自动采集误判已采）。
     """
-    import pipeline
+    import app.pricing.pipeline as pipeline
 
     monkeypatch.setattr(
         pipeline,

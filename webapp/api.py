@@ -15,10 +15,10 @@ import time
 import traceback
 from datetime import datetime
 
-import config as cfg
-import hotel_metrics
-from algorithm import PricingAlgorithm
-from database import DatabasePathError, PricingDatabase
+from app import config as cfg
+from app.database import DatabasePathError, PricingDatabase
+from app.pricing import hotel_metrics
+from app.pricing.algorithm import PricingAlgorithm
 
 from . import ebook_pages, review_pages, static_data
 
@@ -137,7 +137,7 @@ class _JobLog(io.TextIOBase):
 
 def _run_collect(job):
     try:
-        import pipeline
+        from app.pricing import pipeline
 
         buffer = _JobLog(job)
         with contextlib.redirect_stdout(buffer):
@@ -310,7 +310,7 @@ def _modules_with_status():
     """模块清单：static.json 里的 status 是写死的，点评两页要按快照是否可用改写。"""
     mods = static_data.list_modules()
     try:
-        import reviews_analytics
+        from app.reviews import analytics as reviews_analytics
 
         rv = reviews_analytics.summary_or_none()
     except Exception:  # noqa: BLE001
@@ -575,7 +575,7 @@ def _current_price():
 def _room_signal():
     """房型口碑 → 定价信号。快照缺失时返回不可用，页面据此隐藏区块。"""
     try:
-        import room_reputation
+        from app.reviews import reputation as room_reputation
 
         return room_reputation.signal()
     except Exception as exc:  # noqa: BLE001
@@ -587,7 +587,7 @@ def _room_signal():
 # ---------------------------------------------------------------------------
 def _reviews_context():
     """读一次快照，返回 (summary, hotel_name)。没有快照时返回 (None, '')。"""
-    import reviews_analytics
+    from app.reviews import analytics as reviews_analytics
 
     summary = reviews_analytics.summary_or_none()
     if not summary:
@@ -597,7 +597,7 @@ def _reviews_context():
 
 def _llm_status():
     try:
-        import llm
+        from infra import llm
 
         ok, reason = llm.available()
         return {
@@ -617,7 +617,7 @@ def get_replies(theme=None, status=None):
     所以即使一条都没保存过，打开页面也有草稿可看；
     一旦人工生成或编辑过并落库，就以库里的为准。
     """
-    import reply_draft
+    from app.reviews import reply_draft
 
     summary, hotel = _reviews_context()
     if not summary:
@@ -701,7 +701,7 @@ def get_replies(theme=None, status=None):
 
 
 def _find_bad_row(key):
-    import reply_draft
+    from app.reviews import reply_draft
 
     summary, hotel = _reviews_context()
     if not summary:
@@ -719,8 +719,8 @@ def generate_reply(key, prefer_llm=False):
     回退模板并在 fallbackReason 里说明原因——回复功能不该因为
     外部服务抖动而不可用。
     """
-    import llm
-    import reply_draft
+    from infra import llm
+    from app.reviews import reply_draft
 
     row, hotel = _find_bad_row(key)
     base = reply_draft.build_draft(row, hotel_name=hotel)
@@ -864,7 +864,7 @@ def get_overview():
 
     # 优先用真实点评快照：这里的「待处理」是未回复的差评条数
     try:
-        import reviews_analytics
+        from app.reviews import analytics as reviews_analytics
 
         rv = reviews_analytics.summary_or_none()
     except Exception:  # noqa: BLE001 - 快照坏了也不该拖垮概览页
