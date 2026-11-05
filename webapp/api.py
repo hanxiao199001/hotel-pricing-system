@@ -279,24 +279,25 @@ def wait_job(job_id, timeout, poll=2.0):
         time.sleep(poll)
 
 
-def _mark_daily_result(ctype, job):
+def _mark_daily_result(ctype, job, slot=None):
     """任务结束时把结果写进 daily_collects（手动点按钮与每日自动链共用）。
 
-    两边都走这里，「当天已采过」的判重口径才一致：手动采成功后，
-    当天的自动任务直接跳过，不会到点再采一遍。写失败不抛——
-    记录写不进去不该影响采集本身，但会打印到终端，不静默。
+    手动（slot=None）写裸类型：两时段的自动判定都视同已采，不会到点再跑；
+    自动链传 slot（"am"/"pm"），写「类型-时段」键，只影响该时段的判重。
+    写失败不抛——记录写不进去不该影响采集本身，但会打印到终端，不静默。
     """
     try:
         today = datetime.now().strftime("%Y-%m-%d")
+        key = f"{ctype}-{slot}" if slot else ctype
         ok = job.get("state") == "done"
         detail = (
             (f"{job.get('count')} 家竞品" if ctype == "prices"
              else (f"{job.get('kept')} 条点评" if ctype == "reviews"
-                   else f"{job.get('count')} 个 section"))
+                   else "eBook 经营数据已更新"))
             if ok else (job.get("error") or "")[:200]
         )
         get_db().mark_daily_collect(
-            ctype, today, "done" if ok else "failed",
+            key, today, "done" if ok else "failed",
             job_id=str(job.get("id")), detail=detail,
         )
     except Exception as exc:  # noqa: BLE001
@@ -323,14 +324,16 @@ def _modules_with_status():
     for m in mods:
         if m["key"] in ("reviews", "reputation") and rv:
             m["status"] = "snapshot"
+            at = rv["snapshot"].get("at")
             m["statusNote"] = (
-                f"真实点评快照：{rv['snapshot']['kept']} 条携程点评，"
+                f"点评采集数据：{rv['snapshot']['kept']} 条携程点评，"
                 f"截至 {rv['snapshot']['dateMax']}"
+                + (f"（采集于 {at}）" if at else "")
             )
         elif m["key"] == "reports" and ebook_snap and ebook_snap.get("status") == "ok":
             m["status"] = "snapshot"
             at = ebook_snap.get("collected_at") or ""
-            m["statusNote"] = "eBook 实时经营数据" + (
+            m["statusNote"] = "eBook 经营数据" + (
                 f"（采集于 {at}）" if at else ""
             )
         elif (
@@ -352,7 +355,7 @@ def _modules_with_status():
             "title": "差评回复",
             "status": "snapshot",
             "statusNote": (
-                f"基于同一份点评快照；已保存 {drafts['total']} 条草稿、"
+                f"基于同一份点评采集数据；已保存 {drafts['total']} 条草稿、"
                 f"已采用 {drafts['used']} 条"
             ),
         })
@@ -621,7 +624,7 @@ def get_replies(theme=None, status=None):
 
     summary, hotel = _reviews_context()
     if not summary:
-        return {"available": False, "reason": "缺少点评快照，先采集一次点评"}
+        return {"available": False, "reason": "缺少点评采集数据，先采集一次点评"}
 
     db = get_db()
     saved_map = db.get_reply_draft_map()
@@ -705,11 +708,11 @@ def _find_bad_row(key):
 
     summary, hotel = _reviews_context()
     if not summary:
-        raise ValueError("缺少点评快照")
+        raise ValueError("缺少点评采集数据")
     for row in summary["badRows"]:
         if reply_draft.review_key(row) == key:
             return row, hotel
-    raise ValueError("找不到这条点评（快照可能已更新，请刷新页面）")
+    raise ValueError("找不到这条点评（采集数据可能已更新，请刷新页面）")
 
 
 def generate_reply(key, prefer_llm=False):
@@ -851,7 +854,7 @@ def get_overview():
         metrics["occupancy_rate"] if metrics["occupancy_rate"] is not None else 0
     )
     occ_sub = (
-        "eBook 实时入住率 · 与经营报表同源"
+        "eBook 采集入住率 · 与经营报表同源"
         if metrics["source"] == "ebook"
         else "最近一次采集入库值"
     )
@@ -862,7 +865,7 @@ def get_overview():
     review_pending = 0
     review_live = False
 
-    # 优先用真实点评快照：这里的「待处理」是未回复的差评条数
+    # 优先用点评采集数据：这里的「待处理」是未回复的差评条数
     try:
         from app.reviews import analytics as reviews_analytics
 

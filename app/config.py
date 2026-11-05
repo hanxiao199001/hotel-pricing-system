@@ -198,6 +198,29 @@ REVIEWS_CONFIG = {
     # 设成 REVIEWS_BEFORE="" 表示不过滤。
     "before_days": int(os.environ.get("REVIEWS_BEFORE_DAYS", "1") or 1),
     "before": os.environ.get("REVIEWS_BEFORE", None),
+
+    # ---- 增量采集与定期全量校准 ----
+    # 以前每次采集都把全部点评翻一遍、再整体覆盖快照。点评列表按时间倒序，
+    # 日常真正变动的只有最前面几页，全量翻几十上百页既慢又增加风控暴露。
+    #
+    # 现在的策略：
+    #   日常「增量」：从第 1 页往下翻，一旦某页出现旧快照里已有的 commentId，
+    #     即判断到达「新评论边界」，再冗余翻 existing_confirm_pages 页确认后停止。
+    #     只把新增合并进旧快照，不删旧数据。
+    #   定期「全量校准」：每 full_sync_days 天做一次全量翻页，用后台当前可见
+    #     集合整体替换快照——只有这次会真正清掉被删除/下架的点评，避免增量
+    #     模式下快照「只增不删」而逐渐与后台失真。
+    #   full_sync_days <= 0：关闭增量、每次都全量（等价旧行为，可随时回退）。
+    "full_sync_days": int(os.environ.get("REVIEWS_FULL_SYNC_DAYS", "7") or 7),
+    # 增量到达旧点评边界后，再多翻几页确认，防止排序抖动导致提前停止。
+    "existing_confirm_pages": int(
+        os.environ.get("REVIEWS_EXISTING_CONFIRM_PAGES", "2") or 2
+    ),
+    # 全量校准的保护线：采到的条数低于旧快照的这个比例，视为翻页不完整，
+    # 拒绝覆盖、保留旧快照。0 表示不设保护。
+    "full_sync_min_ratio": float(
+        os.environ.get("REVIEWS_FULL_SYNC_MIN_RATIO", "0.5") or 0.5
+    ),
 }
 
 # 携程 eBooking 商家后台 · 经营数据采集（只读）
@@ -375,28 +398,56 @@ def _parse_hhmm(value):
         return _clock_time(int(hh), int(mm))
     except (ValueError, TypeError) as exc:
         raise ConfigError(
-            f"DAILY_COLLECT_AT={value!r} 不是合法的 HH:MM（示例：08:00）。"
+            f"{value!r} 不是合法的 HH:MM（示例：09:00）。"
         ) from exc
 
 
 # 每日自动采集（webapp 内置，实现见 webapp/daily.py）
 #
-# 语义：每天价格、点评各自动采集一次，统一不早于 DAILY_COLLECT_AT：
-#   - 中台开着没人动 → 到点自动执行（8 点后中台才启动的，启动后
-#     poll_seconds 内补采当天这次）；
+# 语义（方案乙：两时段采集链）：
+#   - 09:00 全链：竞品价格 → 经营数据 → 全渠道点评（顺序执行，共用浏览器必须串行）；
+#   - 16:00 短链：竞品价格 → 经营数据（点评变化慢，每天只采一次）。
+# 触发时机（每时段统一不早于各自时点）：
+#   - 中台开着没人动 → 到点自动执行（时点后中台才启动的，启动后
+#     poll_seconds 内补跑当天已到点的时段）；
 #   - 到点之后当天首次有人进入中台 → 立即触发。
-# 判重记录在 daily_collects 表（含手动「立即采集」），当天采过不再重复。
+# 判重记录在 daily_collects 表，按「当天 + 时段」判断（collect_type 带
+# 时段后缀，如 prices-am/pm），含手动采集：价格的手动成功会让早链跳过价格；
+# 价格类还会核对 competitor_prices 里是否已有当天数据（外部跑过 main.py 也算已采）。
 # DATA_SOURCE=mock 自动跳过，避免把模拟数据写进真实库。
-# 默认 max_attempts=1：自动尝试失败当天不重试——频控、登录失效都需要
-# 人工判断，盲目重试只会加剧限流；次日自动重新开始。
+# 默认 max_attempts=1（每时段）：自动尝试失败该时段不重试——频控、登录失效
+# 都需要人工判断，盲目重试只会加剧限流；下一时段/次日自动重新开始。
 DAILY_COLLECT_CONFIG = {
     "enabled": os.environ.get("DAILY_COLLECT_ENABLED", "true").lower() == "true",
-    "at": (os.environ.get("DAILY_COLLECT_AT", "08:00") or "08:00").strip(),
+    # 两个采集时段：morning 全链（价格+经营+点评），afternoon 短链（价格+经营）
+    "at": (os.environ.get("DAILY_COLLECT_AT", "09:00") or "09:00").strip(),
+    "at2": (os.environ.get("DAILY_COLLECT_AT2", "16:00") or "16:00").strip(),
     "poll_seconds": int(os.environ.get("DAILY_COLLECT_POLL_SECONDS", "30") or 30),
     "max_attempts": int(os.environ.get("DAILY_COLLECT_MAX_ATTEMPTS", "1") or 1),
     "cooldown_minutes": int(os.environ.get("DAILY_COLLECT_COOLDOWN_MINUTES", "60") or 60),
 }
-DAILY_COLLECT_CONFIG["at_time"] = _parse_hhmm(DAILY_COLLECT_CONFIG["at"])
+
+def _parse_slot(key, value):
+    """解析时段配置：返回 (时点, 含点评). 格式 HH:MM 或 HH:MM+R（R=点评也采）。
+
+    DAILY_COLLECT_AT=09:00+R 表示早链含点评；at2 默认短链（不含点评）。
+    写错格式启动即报错（复用 _parse_hhmm 的严格校验）。
+    """
+    raw = (value or "").strip()
+    with_reviews = raw.upper().endswith("+R")
+    if with_reviews:
+        raw = raw[:-2].strip()
+    hhmm = _parse_hhmm(raw)
+    if with_reviews and not raw:
+        raise ConfigError(f"{key}={value!r} 不是合法的 HH:MM[+R]（示例：09:00+R）。")
+    return hhmm, with_reviews
+
+DAILY_COLLECT_CONFIG["at_time"], DAILY_COLLECT_CONFIG["at_reviews"] = _parse_slot(
+    "DAILY_COLLECT_AT", DAILY_COLLECT_CONFIG["at"]
+)
+DAILY_COLLECT_CONFIG["at2_time"], DAILY_COLLECT_CONFIG["at2_reviews"] = _parse_slot(
+    "DAILY_COLLECT_AT2", DAILY_COLLECT_CONFIG["at2"]
+)
 
 # 数据库（默认放在项目目录下，可用环境变量覆盖）
 DATABASE = {

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import subprocess
@@ -239,8 +240,13 @@ def extract_review(c: dict) -> dict:
 
 
 def build_result_payload(capture, meta, hotel_name, errors, hotel, city,
-                         before) -> dict:
-    """把捕获数据转成结果 dict。"""
+                         before, incremental=False, stopped_at=None) -> dict:
+    """把捕获数据转成结果 dict。
+
+    incremental=True 时，reviews 里包含「新增」以及边界确认页里的旧点评
+    （上层合并时会按 commentId 去重，不会重复计入）。这种模式下即使一条
+    都没采到也视为成功——说明后台没有新点评，而不是采集失败。
+    """
     reviews, seen = [], set()
     for idx in sorted(capture.by_page.keys()):
         for c in capture.by_page[idx]:
@@ -251,7 +257,7 @@ def build_result_payload(capture, meta, hotel_name, errors, hotel, city,
             reviews.append(extract_review(c))
 
     status = "ok"
-    if not reviews:
+    if not reviews and not incremental:
         status = "error"
         if not errors:
             errors = ["没有采到任何点评（getCommentList 未返回数据）"]
@@ -273,6 +279,8 @@ def build_result_payload(capture, meta, hotel_name, errors, hotel, city,
         "collected": len(reviews),
         "kept": len(reviews),
         "skipped_by_date": 0,
+        "mode": "incremental" if incremental else "full",
+        "stopped_at_existing": stopped_at,
         "reviews": reviews,
         "errors": [e for e in errors if e],
     }
@@ -300,12 +308,32 @@ def _click_next(page) -> bool:
     return False
 
 
-def collect(context, login_wait: int, max_pages: int):
-    """打开点评页，捕获第1页，再点击分页自然翻页。返回 (capture, meta, hotel_name, errors)。"""
+def collect(context, login_wait: int, max_pages: int, existing_ids=None,
+            full: bool = False, confirm_pages: int = 2):
+    """打开点评页，捕获第1页，再点击分页自然翻页。
+
+    返回 (capture, meta, hotel_name, errors) 的 dict。
+
+    增量模式（existing_ids 非空且非 full）：点评列表按时间倒序，从第 1 页
+    往下翻，一旦某页出现旧快照里已有的 commentId，即认为越过「新评论边界」，
+    再冗余翻 confirm_pages 页确认后停止。这样日常只需翻最前面几页。
+    找不到旧边界时（例如上次采集很久以前、ID 体系变化）自动翻到上限，
+    行为与全量一致，由上层做全量替换。
+    """
     capture = CommentCapture()
     meta: dict = {}
     errors: list = []
     hotel_name = ""
+    existing_ids = {str(x) for x in (existing_ids or []) if x is not None}
+    incremental = bool(existing_ids) and not full
+
+    def _page_ids(idx):
+        return {
+            str(c.get("commentId"))
+            for c in (capture.by_page.get(idx) or [])
+            if c.get("commentId") is not None
+        }
+
     page = context.new_page()
     page.on("response", capture.on_response)
 
@@ -321,12 +349,14 @@ def collect(context, login_wait: int, max_pages: int):
 
     page.on("response", on_page_resp)
 
+    reached_at = None
     try:
         log(f"[加载] {COMMENT_PAGE}")
         page.goto(COMMENT_PAGE, wait_until="domcontentloaded", timeout=45000)
         if not wait_until_ready(page, login_wait, "点评页"):
             return {"capture": capture, "meta": meta, "hotel_name": hotel_name,
-                    "errors": ["登录/验证等待超时"]}
+                    "errors": ["登录/验证等待超时"],
+                    "incremental": incremental, "stopped_at": None}
 
         time.sleep(2)
         try:
@@ -351,8 +381,17 @@ def collect(context, login_wait: int, max_pages: int):
         log(f"[点评] 总数={meta.get('commentCount')} 页数={total_pages}")
 
         limit = min(total_pages, max_pages) if total_pages else max_pages
+
+        # 第 1 页就可能已经全是旧点评（当天没有新增），先判定一次边界
+        if incremental and _page_ids(1) & existing_ids:
+            reached_at = 1
+            log("[增量] 第 1 页已出现旧点评，无新增")
+
         cur = 1
         while cur < limit:
+            if incremental and reached_at is not None and cur >= reached_at + confirm_pages:
+                log(f"[增量] 越过新评论边界（第 {reached_at} 页）并确认 {confirm_pages} 页，停止翻页")
+                break
             cur_next = cur + 1
             if not _click_next(page):
                 log(f"第 {cur} 页后找不到下一页，停止翻页")
@@ -361,18 +400,23 @@ def collect(context, login_wait: int, max_pages: int):
                 log(f"第 {cur_next} 页未捕获，停止")
                 break
             cur = cur_next
+            if incremental and reached_at is None and _page_ids(cur) & existing_ids:
+                reached_at = cur
+                log(f"[增量] 第 {cur} 页出现旧点评，继续确认 {confirm_pages} 页")
             if cur % 10 == 0 or cur == limit:
                 log(f"[点评] 已采至第 {cur}/{limit} 页")
     except Exception as e:  # noqa: BLE001
         log(f"[异常] {e}")
         return {"capture": capture, "meta": meta, "hotel_name": hotel_name,
-                "errors": [f"采集异常: {e}"]}
+                "errors": [f"采集异常: {e}"],
+                "incremental": incremental, "stopped_at": reached_at}
     finally:
         try:
             page.close()
         except Exception:  # noqa: BLE001
             pass
-    return {"capture": capture, "meta": meta, "hotel_name": hotel_name, "errors": []}
+    return {"capture": capture, "meta": meta, "hotel_name": hotel_name, "errors": [],
+            "incremental": incremental, "stopped_at": reached_at}
 
 
 def main():
@@ -383,6 +427,12 @@ def main():
     ap.add_argument("--before", default="", help="截止日期（兼容参数，由上层校验过滤）")
     ap.add_argument("--page-size", type=int, default=10, help="后台固定10，此参数忽略")
     ap.add_argument("--max-pages", type=int, default=300, help="最多翻页数安全上限")
+    ap.add_argument("--existing", default="",
+                    help="旧快照路径：增量采集时用其中的 commentId 作为停止边界")
+    ap.add_argument("--full", action="store_true",
+                    help="全量采集（忽略 --existing，翻到上限/页码上限）")
+    ap.add_argument("--confirm-pages", type=int, default=2,
+                    help="增量到达旧点评边界后再确认的页数")
     ap.add_argument("--profile", default="profiles/default",
                     help="浏览器持久化登录目录（需已登录 ebooking）")
     ap.add_argument("--channel", default="chrome", help="chrome/edge/或浏览器exe路径")
@@ -398,8 +448,31 @@ def main():
         "hotel_id": "", "hotel_name": "", "before": args.before,
         "total_count": 0, "page_count": 0, "page_size": 10,
         "collected": 0, "kept": 0, "skipped_by_date": 0,
+        "mode": "full" if args.full else "incremental",
         "reviews": [], "errors": [],
     }
+
+    # 增量模式：加载旧快照的 commentId 集合作为翻页停止边界。
+    # 读不到旧快照（首次采集/路径不对）就退回全量，不带着错误边界去翻页。
+    existing_ids = set()
+    if args.existing and not args.full:
+        try:
+            with open(args.existing, "r", encoding="utf-8") as f:
+                old = json.load(f)
+            for item in old.get("reviews") or []:
+                cid = item.get("id")
+                if cid is not None:
+                    existing_ids.add(str(cid))
+            log(f"[增量] 旧快照 {len(existing_ids)} 条评论作为停止边界")
+        except Exception as e:  # noqa: BLE001
+            existing_ids = set()
+            log(f"[增量] 读取旧快照失败，改全量采集：{type(e).__name__}: {e}")
+    if args.full:
+        log("[全量] 忽略旧快照，做一次全量校准")
+    elif existing_ids:
+        log("[增量] 只采到出现旧点评为止（+确认页）")
+    else:
+        log("[全量] 无可用旧快照，按全量采集")
 
     profile_dir = Path(args.profile).resolve()
     out = Path(args.out).resolve()
@@ -408,10 +481,14 @@ def main():
         with sync_playwright() as pw:
             context, chrome_proc = launch_browser(pw, profile_dir, args.channel, args.cdp_port)
             try:
-                r = collect(context, args.login_wait, args.max_pages)
+                r = collect(context, args.login_wait, args.max_pages,
+                            existing_ids=existing_ids, full=args.full,
+                            confirm_pages=args.confirm_pages)
                 result.update(build_result_payload(
                     r["capture"], r["meta"], args.hotel or r["hotel_name"], r["errors"],
-                    args.hotel, args.city, args.before))
+                    args.hotel, args.city, args.before,
+                    incremental=r.get("incremental", False),
+                    stopped_at=r.get("stopped_at")))
             except Exception as e:  # noqa: BLE001
                 result["status"] = "error"
                 result["message"] = str(e)

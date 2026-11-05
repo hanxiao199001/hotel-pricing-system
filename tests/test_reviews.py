@@ -210,7 +210,7 @@ def test_status_module_list_marks_snapshot(monkeypatch):
     mods = {m["key"]: m for m in api._modules_with_status()}
     for key in ("reviews", "reputation"):
         assert mods[key]["status"] == "snapshot"
-        assert "真实点评快照" in mods[key]["statusNote"]
+        assert "点评采集数据" in mods[key]["statusNote"]
     # 其余模块保持示例
     assert mods["reports"]["status"] == "static"
 

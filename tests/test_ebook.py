@@ -4,6 +4,7 @@
 的解析链路。真实采集端到端由 ebook_collector.py 运行时覆盖。
 """
 import json
+from datetime import date
 
 import pytest
 
@@ -122,16 +123,33 @@ def _sections():
 
 
 def _payload(**overrides):
+    # effectDate 用「今天」动态生成：_today_room_rows 只认当天，
+    # 写死 2026-11-04 后第二天起 table 块就采不到（历史遗留的日期固化）
     data = {
         "status": "ok",
         "platform": "ctrip_ebook",
         "hotel_id": "14266732",
-        "collected_at": "2026-11-04 12:00:00",
+        "collected_at": f"{date.today().isoformat()} 12:00:00",
         "sections": _sections(),
         "errors": [],
     }
     data.update(overrides)
+    if not overrides.get("sections") and "effectDate" not in str(overrides):
+        data["sections"] = _today_sections()
     return data
+
+
+def _today_sections():
+    """effectDate 全部换成今天的 sections。"""
+    import copy
+
+    base = copy.deepcopy(_sections())
+    inv = base["inventory"]["data"]
+    for p in inv["roomPriceResult"]["roomPriceInfo"]:
+        p["effectDate"] = date.today().isoformat()
+    for r in inv["roomStatusResult"]:
+        r["effectDate"] = date.today().isoformat()
+    return base
 
 
 # ---------------------------------------------------------------------------

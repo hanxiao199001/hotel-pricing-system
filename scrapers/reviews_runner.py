@@ -41,8 +41,13 @@ def resolve_before(cfg_dict=None) -> str:
     return (date.today() + timedelta(days=days)).isoformat()
 
 
-def build_command(cfg_dict, out_path: str, hotel: str, city: str = "", before: str = "") -> list:
-    """拼出采集命令。抽成独立函数便于测试，不用真的起进程。"""
+def build_command(cfg_dict, out_path: str, hotel: str, city: str = "", before: str = "",
+                  existing_path: str = "", full: bool = False) -> list:
+    """拼出采集命令。抽成独立函数便于测试，不用真的起进程。
+
+    existing_path：增量模式传旧快照路径，脚本用它判定新评论边界；
+    full：全量校准模式，忽略旧快照翻到底（每 full_sync_days 天一次）。
+    """
     cmd = [
         cfg_dict["python"],
         cfg_dict["script"],
@@ -59,7 +64,95 @@ def build_command(cfg_dict, out_path: str, hotel: str, city: str = "", before: s
         cmd += ["--city", city]
     if before:
         cmd += ["--before", before]
+    if existing_path:
+        cmd += ["--existing", existing_path]
+    if full:
+        cmd += ["--full"]
+    if cfg_dict.get("existing_confirm_pages") is not None:
+        cmd += ["--confirm-pages", str(int(cfg_dict["existing_confirm_pages"]))]
     return cmd
+
+
+# ---------------------------------------------------------------------------
+# 增量 / 全量校准
+# ---------------------------------------------------------------------------
+MODE_FULL = "full"
+MODE_INCREMENTAL = "incremental"
+
+
+def _load_snapshot(path: str):
+    """读取现有快照；不存在或不可解析返回 None（视为首次采集，走全量）。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("reviews"), list):
+        return data
+    return None
+
+
+def _parse_snapshot_time(value):
+    """解析快照里的本地时间字符串（%Y-%m-%d %H:%M[:SS]）。"""
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt, length in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M", 16)):
+        try:
+            return datetime.strptime(text[:length], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def due_for_full_sync(existing, cfg_dict, now=None) -> bool:
+    """判断这次该做全量校准还是增量采集。
+
+    - full_sync_days <= 0：关闭增量，每次都全量（等价旧行为，可随时回退）；
+    - 没有旧快照 / 没有 _last_full_sync：全量（首次或旧格式快照）；
+    - 距上次全量 >= full_sync_days 天：全量校准，顺带清掉被删除的点评。
+    """
+    days = int(cfg_dict.get("full_sync_days") or 0)
+    if days <= 0:
+        return True
+    if not existing:
+        return True
+    last = _parse_snapshot_time(existing.get("_last_full_sync"))
+    if last is None:
+        return True
+    now = now or datetime.now()
+    return (now - last).days >= days
+
+
+def merge_reviews(old_reviews, new_reviews):
+    """按 id 合并：旧点评保留，新采集覆盖同 id 并补入新增。
+
+    返回 (merged_list, added_count)。仅供增量模式使用；全量校准不走这里
+    （全量结果直接替换，被删除的点评才会在快照里真正消失）。
+    """
+    old_map = {}
+    for r in old_reviews or []:
+        if isinstance(r, dict) and r.get("id") is not None:
+            old_map[str(r["id"])] = r
+    new_map = {}
+    for r in new_reviews or []:
+        if isinstance(r, dict) and r.get("id") is not None:
+            new_map[str(r["id"])] = r
+
+    added = len(set(new_map) - set(old_map))
+    merged_map = dict(old_map)
+    merged_map.update(new_map)
+    merged = sorted(
+        merged_map.values(),
+        key=lambda r: str(r.get("created_at") or ""),
+        reverse=True,
+    )
+    return merged, added
+
+
+def _date_range(reviews):
+    dates = sorted(str(r.get("created_at"))[:10] for r in reviews if r.get("created_at"))
+    return (dates[0], dates[-1]) if dates else ("", "")
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +170,12 @@ def _hotel_core(name: str) -> str:
     return name
 
 
-def validate_payload(raw: dict, expected_hotel: str = "", before: str = "") -> dict:
-    """检查脚本产出的 JSON。不可信就抛错——宁可失败，也不拿错数据覆盖旧快照。"""
+def validate_payload(raw: dict, expected_hotel: str = "", before: str = "",
+                     allow_empty: bool = False) -> dict:
+    """检查脚本产出的 JSON。不可信就抛错——宁可失败，也不拿错数据覆盖旧快照。
+
+    allow_empty：增量模式下后台可能确实没有新点评，允许 reviews 为空。
+    """
     if not isinstance(raw, dict):
         raise ReviewsCollectError("采集结果不是 JSON 对象")
 
@@ -97,7 +194,16 @@ def validate_payload(raw: dict, expected_hotel: str = "", before: str = "") -> d
         raise ReviewsCollectError(f"采集脚本返回 {status or '未知状态'}：{detail}")
 
     reviews = raw.get("reviews")
-    if not isinstance(reviews, list) or not reviews:
+    if not isinstance(reviews, list):
+        raise ReviewsCollectError("采集结果的 reviews 不是数组")
+    if not reviews:
+        if allow_empty:
+            return {
+                "payload": dict(raw, reviews=[]),
+                "kept": 0, "rawCount": 0, "dropped": 0, "duplicates": 0,
+                "dateMin": "", "dateMax": "",
+                "hotelName": (raw.get("hotel_name") or raw.get("hotel") or "").strip(),
+            }
         raise ReviewsCollectError("采集结果为空（reviews 为空数组）")
 
     # 酒店是否真的是我们要的那家——错了会静默污染全部口碑指标
@@ -255,10 +361,25 @@ def collect(hotel: str = "", city: str = "", log=_log_noop, cfg_dict=None) -> di
         os.remove(tmp_out)
 
     before = resolve_before(cfg_dict)
-    cmd = build_command(cfg_dict, tmp_out, hotel, city, before)
+
+    # 读旧快照决定这次是「增量」还是「全量校准」：
+    #   增量 = 只翻到旧点评边界，合并新增；
+    #   全量 = 每 full_sync_days 天一次，用后台当前可见集合校准（顺带清掉已删点评）。
+    existing = _load_snapshot(primary)
+    full_sync = due_for_full_sync(existing, cfg_dict)
+    mode = MODE_FULL if full_sync else MODE_INCREMENTAL
+    existing_path = primary if mode == MODE_INCREMENTAL else ""
+
+    cmd = build_command(cfg_dict, tmp_out, hotel, city, before,
+                        existing_path=existing_path, full=(mode == MODE_FULL))
     log(f"🏨 采集点评：{hotel}（{city or '未指定城市'}）")
     log(f"   脚本: {cfg_dict['script']}")
-    log(f"   截止: {before or '不过滤'} · 最多 {cfg_dict['max_pages']} 页")
+    log(f"   模式: {'全量校准' if mode == MODE_FULL else '增量采集'}"
+        f" · 截止: {before or '不过滤'} · 最多 {cfg_dict['max_pages']} 页")
+    if mode == MODE_INCREMENTAL:
+        confirm = int(cfg_dict.get("existing_confirm_pages") or 2)
+        log(f"   旧快照: {len((existing or {}).get('reviews') or [])} 条，"
+            f"翻到旧点评边界即停（+{confirm} 页确认）")
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -302,28 +423,85 @@ def collect(hotel: str = "", city: str = "", log=_log_noop, cfg_dict=None) -> di
     except (OSError, json.JSONDecodeError) as exc:
         raise ReviewsCollectError(f"采集脚本没有产出可解析的结果文件：{exc}") from exc
 
-    checked = validate_payload(raw, expected_hotel=hotel, before=before)
-    checked["payload"]["_collected_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    checked["payload"]["_source_script"] = cfg_dict["script"]
+    # 增量模式允许「没有新点评」，此时 reviews 为空是正常结果
+    checked = validate_payload(raw, expected_hotel=hotel, before=before,
+                               allow_empty=(mode == MODE_INCREMENTAL))
+    clean = checked["payload"].get("reviews") or []
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # 校验通过才替换，原子操作，中途失败不会留下半个文件
+    if mode == MODE_INCREMENTAL:
+        old_reviews = (existing or {}).get("reviews") or []
+        merged, added = merge_reviews(old_reviews, clean)
+        payload = dict(checked["payload"])
+        payload["reviews"] = merged
+        payload["kept"] = len(merged)
+        payload["collected"] = len(clean)
+        payload["mode"] = MODE_INCREMENTAL
+        payload["_collection_mode"] = MODE_INCREMENTAL
+        payload["_added"] = added
+        # 增量不算一次校准，保留上次全量校准时间；没有就留空（下次会全量）
+        payload["_last_full_sync"] = (existing or {}).get("_last_full_sync") or ""
+    else:
+        old_n = len(((existing or {}).get("reviews")) or [])
+        ratio = float(cfg_dict.get("full_sync_min_ratio") or 0)
+        if old_n and ratio > 0 and len(clean) < old_n * ratio:
+            raise ReviewsCollectError(
+                f"全量校准只采到 {len(clean)} 条，旧快照 {old_n} 条"
+                f"（低于保护线 {ratio:.0%}），疑似翻页不完整，已拒绝覆盖并保留旧快照。"
+            )
+        merged, added = clean, len(clean)
+        payload = dict(checked["payload"])
+        payload["reviews"] = merged
+        payload["kept"] = len(merged)
+        payload["collected"] = len(clean)
+        payload["mode"] = MODE_FULL
+        payload["_collection_mode"] = MODE_FULL
+        payload["_added"] = added
+        payload["_last_full_sync"] = now_str
+
+    payload["_collected_at"] = now_str
+    payload["_source_script"] = cfg_dict["script"]
+    date_min, date_max = _date_range(merged)
+
+    # 增量且确实没有新增：不写盘，保留旧快照，避免无意义的 mtime 变动
+    if mode == MODE_INCREMENTAL and added == 0 and existing is not None:
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+        log(f"✅ 本次没有新点评，保留旧快照（共 {len(merged)} 条）")
+        return {
+            "status": "ok", "path": primary, "mode": mode, "added": 0,
+            "kept": len(merged), "rawCount": checked["rawCount"],
+            "duplicates": checked["duplicates"], "dropped": checked["dropped"],
+            "dateMin": date_min, "dateMax": date_max,
+            "hotel": checked["hotelName"] or hotel, "before": before,
+        }
+
+    # 校验通过才替换，原子操作，中途失败不会留下半个文件。
+    # 注意：这里要把内存里合并/校准后的 payload 写回临时文件，
+    # 不能直接 replace 脚本的原始输出——增量合并的结果只在内存里。
+    with open(tmp_out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
     os.replace(tmp_out, primary)
 
-    log(
-        f"✅ 点评采集完成：保留 {checked['kept']} 条"
-        f"（原始 {checked['rawCount']} 条，去重 {checked['duplicates']} 条，"
-        f"丢弃 {checked['dropped']} 条），"
-        f"日期 {checked['dateMin']} ~ {checked['dateMax']}"
-    )
+    if mode == MODE_INCREMENTAL:
+        log(f"✅ 增量采集完成：新增 {added} 条，合并后 {len(merged)} 条"
+            f"（日期 {date_min} ~ {date_max}）")
+    else:
+        log(f"✅ 全量校准完成：保留 {len(merged)} 条"
+            f"（原始 {checked['rawCount']} 条，去重 {checked['duplicates']} 条，"
+            f"丢弃 {checked['dropped']} 条），日期 {date_min} ~ {date_max}")
+
     return {
         "status": "ok",
         "path": primary,
-        "kept": checked["kept"],
+        "mode": mode,
+        "added": added,
+        "kept": len(merged),
         "rawCount": checked["rawCount"],
         "duplicates": checked["duplicates"],
         "dropped": checked["dropped"],
-        "dateMin": checked["dateMin"],
-        "dateMax": checked["dateMax"],
+        "dateMin": date_min,
+        "dateMax": date_max,
         "hotel": checked["hotelName"] or hotel,
         "before": before,
     }
@@ -348,6 +526,9 @@ def snapshot_info(cfg_dict=None) -> dict:
         "snapshotExists": os.path.isfile(path),
         "snapshotMtime": None,
         "snapshotCount": None,
+        "snapshotMode": None,
+        "lastFullSync": None,
+        "snapshotAdded": None,
         "before": resolve_before(cfg_dict),
     }
     if info["snapshotExists"]:
@@ -355,6 +536,10 @@ def snapshot_info(cfg_dict=None) -> dict:
         info["snapshotMtime"] = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
         data = reviews_analytics.summary_or_none()
         if data:
-            info["snapshotCount"] = data["snapshot"]["kept"]
-            info["snapshotDateMax"] = data["snapshot"]["dateMax"]
+            snap = data["snapshot"]
+            info["snapshotCount"] = snap["kept"]
+            info["snapshotDateMax"] = snap["dateMax"]
+            info["snapshotMode"] = snap.get("collectionMode")
+            info["lastFullSync"] = snap.get("lastFullSync")
+            info["snapshotAdded"] = snap.get("added")
     return info

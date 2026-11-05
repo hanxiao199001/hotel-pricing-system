@@ -157,7 +157,7 @@ def _llm_blocks(summary):
                  f"（{res.get('model') or '—'}，{res.get('generatedAt') or '本次新生成'}）。"
                  "严重度是「整改紧迫性」判断，不等同于上文的提及次数——"
                  "某项提及少但性质严重时仍会标为高。统计数字与「硬件／服务」归因由规则计算，"
-                 "不受模型影响；同一份快照结论固定，换快照或换模型才会重新生成。"),
+                 "不受模型影响；同一份采集数据结论固定，换数据或换模型才会重新生成。"),
     })
     return out
 
@@ -395,15 +395,15 @@ def build_reputation(s, price=None):
     note = {"type": "note",
             "text": (f"口径：好评 ≥{s['thresholds']['goodRating']:.0f} 分，"
                      f"差评 ≤{s['thresholds']['badRating']:.0f} 分；星级按评分四舍五入。"
-                     f"数据是 {snap['at']} 抓取的历史切片，仅覆盖携程公开点评页"
+                     f"数据由采集脚本于 {snap['at']} 采集，仅覆盖携程公开点评页"
                      f"（{snap['before']} 之前发布的内容，"
                      f"{snap['dateMin']} 至 {snap['dateMax']}），"
                      f"采到 {_fmt(snap['collected'])} 条、保留 {_fmt(snap['kept'])} 条。"
                      + gap_note +
                      "美团、飞猪与商家后台数据未包含在内。")}
 
-    status = (f"数据来自 {snap['at']} 的携程点评快照（{snap['dateMin']} 至 {snap['dateMax']}，"
-              f"{_fmt(snap['kept'])} 条）。不是实时接口，刷新页面不会更新。")
+    status = (f"数据采集于 {snap['at']}（点评日期 {snap['dateMin']} 至 {snap['dateMax']}，"
+              f"{_fmt(snap['kept'])} 条）。需要更新时点右上角「采集全渠道点评」。")
     blocks = [kpis[0], star_bars, dim_table, mention_bars]
     blocks += _room_pricing_blocks(s, price)
     blocks += [room_table, month_table, banner]
@@ -507,7 +507,7 @@ def build_reviews(s):
                      "一条点评可命中多个主题，所以各主题条数之和大于差评总数。"
                      "差评与房型、定价的联动见「口碑分析」页的「房型 → 定价影响」。")}
 
-    status = (f"数据来自 {snap['at']} 的携程点评快照（{_fmt(snap['kept'])} 条，"
+    status = (f"数据采集于 {snap['at']}（{_fmt(snap['kept'])} 条，"
               f"最新一条 {snap['dateMax']}，其中 {overall['bad']} 条差评）。"
               "不含美团/飞猪，也没有回复发布能力。")
     blocks = [kpis, theme_bars, detail_table]

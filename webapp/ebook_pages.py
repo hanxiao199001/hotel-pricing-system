@@ -191,7 +191,7 @@ def _build_reports(sections, raw):
         {
             "label": "入住率",
             "value": _pct(occupancy) if occupancy is not None else "—",
-            "sub": "eBook 容量概览·实时",
+            "sub": "eBook 容量概览·采集时",
         },
         {
             "label": "RevPAR",
@@ -224,11 +224,11 @@ def _build_reports(sections, raw):
         })
 
     # ---- 来源说明 ----
-    note_parts = [f"实时采集自 eBooking（{collected_at or '时间未知'}）"]
+    note_parts = [f"采集自 eBooking（{collected_at or '时间未知'}）"]
     if core["competitors"]:
         note_parts.append(f"竞争圈 {core['competitors']} 家")
     if core["order_quantity"] is not None:
-        note_parts.append(f"实时订单 {_fmt(core['order_quantity'], 0)}")
+        note_parts.append(f"采集时订单 {_fmt(core['order_quantity'], 0)}")
     if core["stay_in"] is not None:
         note_parts.append(f"在住 {_fmt(core['stay_in'], 0)} 间")
     blocks.append({"type": "note", "text": "，".join(note_parts) + "。仅汇总读取，不改动后台。"})
@@ -238,7 +238,7 @@ def _build_reports(sections, raw):
         "hotelId": raw.get("hotel_id") or "",
         "source": "ctrip_ebook",
     }
-    status_note = "eBook 实时经营数据" + (f"（采集于 {collected_at}）" if collected_at else "")
+    status_note = "eBook 经营数据" + (f"（采集于 {collected_at}）" if collected_at else "")
     return _module("reports", "经营报表", status_note, blocks, snapshot)
 
 
@@ -410,7 +410,7 @@ def _build_guests(sections, raw):
     blocks.append({
         "type": "note",
         "text": (
-            f"实时采集自 eBooking 用户行为（{collected_at or '时间未知'}）；"
+            f"采集自 eBooking 用户行为（{collected_at or '时间未知'}）；"
             "统计口径为过去 180 天订单数据，仅汇总读取，不改动后台。"
         ),
     })

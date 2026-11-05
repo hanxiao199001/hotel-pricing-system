@@ -6,23 +6,44 @@
 'use strict';
 
 const PAGES = [
-  { key: 'overview',    group: '经营', title: '概览',           sub: '今日该不该调价，先看这里', ico: '◧', live: true },
-  { key: 'radar',       group: '经营', title: '价格雷达',       sub: '周边竞品实时价格与分布',   ico: '◎', live: true },
-  { key: 'suggestions', group: '经营', title: '调价建议',       sub: '建议模式：人拍板才算数',   ico: '✎', live: true },
-  { key: 'reviews',     group: '口碑', title: '差评预警',       sub: '真实点评归类 · 只读快照', ico: '!', live: false, snapshot: true },
-  { key: 'replies',     group: '口碑', title: '差评回复',       sub: '生成草稿 · 人工确认后发布', ico: '✉', live: false, snapshot: true },
-  { key: 'reputation',  group: '口碑', title: '口碑分析',       sub: '四维拆解 · 房型与定价',   ico: '❖', live: false, snapshot: true },
-  { key: 'reports',     group: '经营', title: '经营报表',       sub: '周报月报 · 数字对得上账',  ico: '▤', live: false, snapshot: true },
-  { key: 'guests',      group: '经营', title: '客源结构',       sub: '客源地 / 渠道 / 复购',    ico: '◈', live: false, snapshot: true },
-  { key: 'tasks',       group: '协同', title: '办公协同',       sub: '工单排班与跨部门提醒',     ico: '☑', live: false },
-  { key: 'group',       group: '集团', title: '集团驾驶舱',     sub: '只看共享池与匿名计数',     ico: '⛭', live: false },
-  { key: 'system',      group: '系统', title: '系统状态',       sub: '数据源、文件、采集任务',   ico: '⚙', live: true },
+  { key: 'overview',    group: '经营', title: '概览',           sub: '今日该不该调价，先看这里', ico: '◧', collected: true,  collect: 'multi' },
+  { key: 'radar',       group: '经营', title: '价格雷达',       sub: '周边竞品价格与分布',       ico: '◎', collected: true,  collect: 'prices' },
+  { key: 'suggestions', group: '经营', title: '调价建议',       sub: '建议模式：人拍板才算数',   ico: '✎', collected: true,  collect: 'prices' },
+  { key: 'reviews',     group: '口碑', title: '差评预警',       sub: '真实点评归类 · 采集数据', ico: '!', collected: true, collect: 'reviews' },
+  { key: 'replies',     group: '口碑', title: '差评回复',       sub: '生成草稿 · 人工确认后发布', ico: '✉', collected: true, collect: 'reviews' },
+  { key: 'reputation',  group: '口碑', title: '口碑分析',       sub: '四维拆解 · 房型与定价',   ico: '❖', collected: true, collect: 'reviews' },
+  { key: 'reports',     group: '经营', title: '经营报表',       sub: '周报月报 · 数字对得上账',  ico: '▤', collected: true, collect: 'ebook' },
+  { key: 'guests',      group: '经营', title: '客源结构',       sub: '客源地 / 渠道 / 复购',    ico: '◈', collected: true, collect: 'ebook' },
+  { key: 'tasks',       group: '协同', title: '办公协同',       sub: '工单排班与跨部门提醒',     ico: '☑', collect: null },
+  { key: 'group',       group: '集团', title: '集团驾驶舱',     sub: '只看共享池与匿名计数',     ico: '⛭', collect: null },
+  { key: 'system',      group: '系统', title: '系统状态',       sub: '数据源、文件、采集任务',   ico: '⚙', system: true, collect: null },
 ];
+
+/* 三类采集：按钮文案、数据源、耗时、接口一一对应 */
+const COLLECT_META = {
+  prices: {
+    label: '采集竞品价格', menuLabel: '竞品价格',
+    source: '携程公开页', duration: '约 30–90 秒',
+    endpoint: '/api/collect',
+  },
+  ebook: {
+    label: '采集经营数据', menuLabel: '经营数据',
+    source: 'eBooking · 只读', duration: '约 1–2 分钟',
+    endpoint: '/api/ebook/collect',
+  },
+  reviews: {
+    label: '采集全渠道点评', menuLabel: '全渠道点评',
+    source: 'eBooking · 只读', duration: '约 1–3 分钟',
+    endpoint: '/api/reviews/collect',
+  },
+};
 
 const state = {
   page: 'overview',
   status: null,
   jobId: null,
+  jobKind: null,
+  jobState: 'idle',
   jobTimer: null,
   radarSort: { key: 'price', dir: 'asc' },
   radarDate: null,
@@ -79,8 +100,7 @@ function kpiGrid(items) {
 }
 
 function srcDot(source) {
-  if (source === 'live') return '<span class="status-dot ok" title="实时数据"></span>';
-  if (source === 'snapshot') return '<span class="status-dot snap" title="历史快照"></span>';
+  if (source === 'live' || source === 'snapshot') return '<span class="status-dot ok" title="采集数据"></span>';
   if (source === 'static') return '<span class="status-dot warn" title="示例数据"></span>';
   return '<span class="status-dot warn" title="含示例数据"></span>';
 }
@@ -171,7 +191,7 @@ function renderNav() {
       <button class="nav-item ${p.key === state.page ? 'on' : ''}" data-page="${p.key}">
         <span class="ico">${p.ico}</span>
         <span>${esc(p.title)}</span>
-        <span class="${p.live ? 'dot-live' : (p.snapshot ? 'dot-snap' : 'dot-static')}" title="${p.live ? '实时数据' : (p.snapshot ? '历史快照' : '示例数据')}"></span>
+        <span class="${p.system ? 'dot-system' : (p.collected ? 'dot-collected' : 'dot-static')}" title="${p.system ? '系统状态' : (p.collected ? '采集数据' : '示例数据')}"></span>
       </button>`).join('')}
   `).join('');
 
@@ -192,10 +212,14 @@ async function renderPage() {
   const meta = PAGES.find((p) => p.key === state.page);
   $('#pageTitle').textContent = meta.title;
   $('#pageSub').textContent = meta.sub;
-  const badge = meta.live ? { cls: 'live', text: '实时数据' }
-    : (meta.snapshot ? { cls: 'snapshot', text: '历史快照' } : { cls: 'static', text: '示例数据' });
+  const badge = meta.system ? { cls: 'brand', text: '系统状态' }
+    : (meta.collected ? { cls: 'collected', text: '采集数据' } : { cls: 'static', text: '示例数据' });
   $('#srcBadge').className = 'badge ' + badge.cls;
   $('#srcBadge').innerHTML = `<i></i>${badge.text}`;
+  $('#srcBadge').title = meta.system
+    ? '系统运行与采集任务状态'
+    : (meta.collected ? '数据来自采集脚本，采集时间见页内说明' : '模块尚未实现，当前为示例数据');
+  renderTopActions(meta);
 
   const box = $('#content');
   box.innerHTML = '<div class="loading">正在加载…</div>';
@@ -209,6 +233,7 @@ async function renderPage() {
   } catch (err) {
     box.innerHTML = `<div class="card"><div class="empty"><b>加载失败</b>${esc(err.message)}</div></div>`;
   }
+  syncSystemCollectButtons();
 }
 
 /* ==========================================================================
@@ -219,10 +244,10 @@ async function renderOverview(box) {
   const r = d.radar;
   const sug = d.suggestion;
 
-  const srcBar = `<div class="srcbar ${r.empty ? '' : 'live'}">
-    <b>${r.empty ? '暂无采集数据' : '实时数据'}</b>
+  const srcBar = `<div class="srcbar ${r.empty ? '' : 'collected'}">
+    <b>${r.empty ? '暂无采集数据' : '采集数据'}</b>
     <span>${r.empty
-      ? '库里还没有竞品记录。点右上角「立即采集」跑一次，或先在命令行执行 python main.py。'
+      ? '库里还没有竞品记录。点右上角「采集数据」选择「竞品价格」跑一次，或先在命令行执行 python main.py。'
       : `竞品价格来自 ${esc(r.date)} 的携程采集（半径 ${esc(r.distanceKm)} km，${r.stats.count} 家）；入住率为人工填写。`}</span>
   </div>`;
 
@@ -257,8 +282,8 @@ async function renderOverview(box) {
   const rv = d.reviews || {};
   const reviewNote = rv.available
     ? (rv.unreplied
-        ? `另有 ${rv.unreplied} 条差评待回复（${esc(rv.snapshotDate)} 快照）。`
-        : `${rv.bad} 条差评均已回复（${esc(rv.snapshotDate)} 快照）。`)
+        ? `另有 ${rv.unreplied} 条差评待回复（数据截至 ${esc(rv.snapshotDate)}）。`
+        : `${rv.bad} 条差评均已回复（数据截至 ${esc(rv.snapshotDate)}）。`)
     : '差评模块为示例数据。';
 
   box.innerHTML = srcBar
@@ -286,15 +311,15 @@ async function renderOverview(box) {
     + card('模块入口', `<div class="tiles">
         ${[['reviews', '差评预警',
              rv.available ? `${rv.bad} 条差评` : '—',
-             rv.available ? `只看不回 · ${esc(rv.snapshotDate)} 快照` : '示例数据'],
+             rv.available ? `只看不回 · ${esc(rv.snapshotDate)} 采集` : '示例数据'],
            ['replies', '差评回复',
              rv.available ? `${rv.bad} 条可起草` : '—',
              '模板/模型 · 人工确认'],
            ['reputation', '口碑分析',
              rv.available ? `综合 ${num(rv.avg, 2)}` : '—',
              rv.available ? '四维拆解 · 房型定价' : '示例数据'],
-           ['reports', '经营报表', 'ADR / 入住率 / 房型价', 'eBook 采集 · 快照'],
-           ['guests', '客源结构', '客源地 / 渠道 / 画像', 'eBook 采集 · 快照'],
+           ['reports', '经营报表', 'ADR / 入住率 / 房型价', 'eBook 采集'],
+           ['guests', '客源结构', '客源地 / 渠道 / 画像', 'eBook 采集'],
            ['tasks', '办公协同', '12 张工单', '示例 · 需工单系统'],
            ['group', '集团驾驶舱', '12 家门店', '示例 · 需多店部署']]
           .map(([k, t, v, note]) => `<div class="tile" data-go="${k}">
@@ -302,7 +327,7 @@ async function renderOverview(box) {
           </div>`).join('')}
       </div>
       <div class="note" style="margin-top:10px">${rv.available
-        ? `差评、口碑、回复三页已接真实点评快照（截至 ${esc(rv.snapshotDate)}，${Number(rv.kept).toLocaleString('zh-CN')} 条）；经营报表、客源结构来自 eBook 实时采集；协同与集团驾驶舱仍是示例数据。`
+        ? `差评、口碑、回复三页已接点评采集数据（截至 ${esc(rv.snapshotDate)}，${Number(rv.kept).toLocaleString('zh-CN')} 条）；经营报表、客源结构来自 eBook 采集；协同与集团驾驶舱仍是示例数据。`
         : '这 7 个模块的数据均为示例数据。'}</div>`);
 
   box.querySelectorAll('[data-go]').forEach((n) => n.addEventListener('click', () => {
@@ -447,7 +472,7 @@ async function renderRadar(box) {
   }).join('');
 
   box.innerHTML = `
-    <div class="srcbar live"><b>实时数据</b>
+    <div class="srcbar collected"><b>采集数据</b>
       <span>${esc(d.date)} 携程采集 · 半径 ${esc(d.distanceKm)} km · 校验通过 ${stats.count} 家（价格 &gt; 0、按名称去重、城市一致性）</span>
       <span class="spacer"></span>
       <select id="dateSel" style="width:auto">${d.dates.map((x) => `<option ${x === d.date ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
@@ -632,7 +657,7 @@ async function renderSuggestions(box) {
     </tr>`).join('') : '<tr><td colspan="6" class="muted">还没有已执行的调价记录</td></tr>';
 
   box.innerHTML = `
-    <div class="srcbar live"><b>建议模式</b>
+    <div class="srcbar collected"><b>建议模式</b>
       <span>系统只出建议，改成「已确认」才算数。确认动作只写入本地调价记录，不会代替你去 OTA 后台改价。</span>
     </div>
 
@@ -685,7 +710,7 @@ function scopedReplyItems() {
 async function renderReplies(box) {
   const d = await apiGet('/api/replies');
   if (!d.available) {
-    box.innerHTML = `<div class="card"><div class="empty"><b>还没有可用的点评快照</b>${esc(d.reason || '先采集一次点评')}</div></div>`;
+    box.innerHTML = `<div class="card"><div class="empty"><b>还没有可用的点评采集数据</b>${esc(d.reason || '先采集一次点评')}</div></div>`;
     return;
   }
 
@@ -698,19 +723,18 @@ async function renderReplies(box) {
     ? `<span class="badge live"><i></i>模型可用 · ${esc(d.llm.model)}</span>`
     : `<span class="badge static"><i></i>模板模式</span>`;
 
-  const srcBar = `<div class="srcbar snap">
-    <b>真实点评快照</b>
+  const srcBar = `<div class="srcbar collected">
+    <b>采集数据</b>
     <span>${d.badTotal} 条差评（最新 ${esc(d.snapshotDate)}）。草稿由系统生成，<b>不会自动发布</b>——
       复制到携程商家后台发出后，回来点「标记已采用」。</span>
     <span class="srcact">
       ${llmBar}
-      <button class="btn" id="btnRepliesCollect" style="white-space:nowrap">重新采集点评</button>
     </span>
   </div>`;
 
   const pendingCount = d.items.filter(isPendingReply).length;
   const kpis = [
-    { label: '差评总数', value: `${d.badTotal} 条`, sub: `快照 ${esc(d.snapshotDate)}`, tone: 'warm' },
+    { label: '差评总数', value: `${d.badTotal} 条`, sub: `数据截至 ${esc(d.snapshotDate)}`, tone: 'warm' },
     { label: '已采用', value: `${d.stats.used} 条`, sub: '已发布到平台', tone: d.stats.used ? 'ok' : '' },
     { label: '已弃用', value: `${d.stats.discarded} 条`, sub: '决定不回复' },
     { label: '待处理', value: `${pendingCount} 条`,
@@ -734,9 +758,6 @@ async function renderReplies(box) {
   paintReplyList();
   paintReplyStatusFilters();
   paintReplyThemeFilters();
-
-  const btn = $('#btnRepliesCollect');
-  if (btn) btn.addEventListener('click', () => startCollect('reviews'));
   bindReplyActions(box);
 }
 
@@ -1050,26 +1071,17 @@ async function copyText(text) {
    ========================================================================== */
 async function renderStatic(box, key) {
   const m = await apiGet('/api/modules/' + key);
-  const isSnapshot = m.source === 'snapshot';
-  const isEbook = key === 'reports' || key === 'guests';
-  const bar = isSnapshot
-    ? `<div class="srcbar snap">
-         <b>历史快照</b>
-         <span>${esc(m.statusNote || '数据来自历史采集快照')}</span>
-         ${isEbook
-           ? `<button class="btn" id="btnEbookCollect" style="margin-left:auto;white-space:nowrap">重新采集经营数据</button>`
-           : `<button class="btn" id="btnReviewsCollect" style="margin-left:auto;white-space:nowrap">重新采集点评</button>`}
+  const isCollected = m.source !== 'static';
+  const bar = isCollected
+    ? `<div class="srcbar collected">
+         <b>采集数据</b>
+         <span>${esc(m.statusNote || '数据来自采集脚本')}</span>
        </div>`
     : `<div class="srcbar">
          <b>示例数据</b>
          <span>${esc(m.statusNote || '该模块尚未实现，页面为示例数据')}。结构与交互已定，接真实数据时前端不用改。</span>
        </div>`;
   box.innerHTML = bar + renderBlocks(m.blocks);
-
-  const btnE = $('#btnEbookCollect');
-  if (btnE) btnE.addEventListener('click', () => startCollect('ebook'));
-  const btnR = $('#btnReviewsCollect');
-  if (btnR) btnR.addEventListener('click', () => startCollect('reviews'));
 }
 
 /* ==========================================================================
@@ -1089,10 +1101,21 @@ async function renderSystem(box) {
   const d = s.daily || {};
   const dailyCell = (t) => {
     if (!d.enabled) return '<span class="muted">未开启</span>';
-    if (!t) return '<span class="muted">今天还没有记录</span>';
-    if (t.status === 'done' || t.done) return flag(true, `今日已采${t.detail ? '（' + esc(t.detail) + '）' : ''}${t.updatedAt ? ' · ' + esc(String(t.updatedAt).slice(11)) : ''}`);
-    if (t.status === 'failed') return flag(false, `今日第 ${t.attempts} 次尝试失败${t.detail ? ' · ' + esc(t.detail).slice(0, 80) : ''}`);
-    return '<span class="muted">今天还没有记录</span>';
+    if (!t) return '<span class="muted">该时段没有记录</span>';
+    if (t.status === 'done' || t.done) {
+      const via = t.viaManual ? '（手动采集，本轮跳过）' : '';
+      return flag(true, `已采${via}${t.detail ? '：' + esc(t.detail) : ''}${t.updatedAt ? ' · ' + esc(String(t.updatedAt).slice(11)) : ''}`);
+    }
+    if (t.status === 'failed') return flag(false, `第 ${t.attempts} 次尝试失败${t.detail ? ' · ' + esc(t.detail).slice(0, 80) : ''}`);
+    return '<span class="muted">该时段还没有记录</span>';
+  };
+  const slotRows = (slot, label, at, withR) => {
+    const t = (d.slots && d.slots[slot]) || {};
+    return `<div class="kv"><span>${label} ${esc(at)}${withR ? ' · 含点评' : ''}</span><span style="display:block;flex:1;min-width:0">
+      <div class="kv" style="padding:2px 0;border:0"><span style="color:var(--muted)">竞品价格</span><span>${dailyCell(t.prices)}</span></div>
+      <div class="kv" style="padding:2px 0;border:0"><span style="color:var(--muted)">经营数据</span><span>${dailyCell(t.ebook)}</span></div>
+      <div class="kv" style="padding:2px 0;border:0"><span style="color:var(--muted)">全渠道点评</span><span>${withR ? dailyCell(t.reviews) : '<span class="muted">本链不采</span>'}</span></div>
+    </span></div>`;
   };
 
   const jobs = (s.jobs || []).map((j) => `
@@ -1102,7 +1125,7 @@ async function renderSystem(box) {
     </div>`).join('') || '<div class="note">还没有采集任务</div>';
 
   box.innerHTML = `
-    <div class="srcbar ${cfg.ok ? 'live' : ''}">
+    <div class="srcbar ${cfg.ok ? 'ok' : ''}">
       <b>${cfg.ok ? '配置就绪' : '配置不完整'}</b>
       <span>${cfg.ok ? '可以运行采集与定价计算。' : esc(cfg.message)}</span>
     </div>
@@ -1140,44 +1163,44 @@ async function renderSystem(box) {
 
     <div class="grid c2">
       <div style="display:flex;flex-direction:column;gap:16px">
-        ${card('每日自动采集', `
+        ${card('每日自动采集（两时段）', `
           <div class="kv"><span>机制</span><span>${d.enabled
-            ? `每天 ${esc(d.at)} 自动执行；到点后当天首次进入中台会立即触发；当天已采过（含手动）不再重复`
+            ? `早链 ${esc(d.at)}${d.atReviews ? '（价格→经营→点评）' : '（价格→经营）'}；晚链 ${esc(d.at2)}${d.at2Reviews ? '（价格→经营→点评）' : '（价格→经营）'}。到点后当天首次进入中台会立即触发；该时段已采过（含手动）不再重复`
             : '未开启（.env 设 DAILY_COLLECT_ENABLED=true 恢复）'}</span></div>
-          <div class="kv"><span>价格数据</span><span>${dailyCell(d.prices)}</span></div>
-          <div class="kv"><span>点评数据</span><span>${dailyCell(d.reviews)}</span></div>
+          ${slotRows('am', '早链', d.at, d.atReviews)}
+          ${slotRows('pm', '晚链', d.at2, d.at2Reviews)}
           ${d.skipReason ? `<div class="note">当前为 ${esc(d.dataSource)} 模式：${esc(d.skipReason)}。</div>` : ''}
           ${d.error ? `<div class="note">读取每日采集状态失败：${esc(d.error)}</div>` : ''}
-          <div class="note">失败当天不自动重试，可点下方「立即采集」手动补采；判重记录在 daily_collects 表，重启中台不会重复采。</div>`)}
-        ${card('价格采集', jobs + `<div class="row" style="margin-top:12px"><button class="btn primary" id="btnCollect2">立即采集一次</button>
+          <div class="note">失败当时段不自动重试，可用下方按钮手动补采；判重按「数据×时段」记录在 daily_collects 表，重启中台不会重复采；三链共用浏览器串行执行。</div>`)}
+        ${card('竞品价格采集', jobs + `<div class="row" style="margin-top:12px"><button class="btn primary" data-collect-kind="prices">采集竞品价格</button>
           <span class="note">约 30–90 秒；跑完自动刷新数据</span></div>`)}
         ${card('点评采集（口碑 / 差评两页的数据源）', `
           <div class="kv"><span>采集脚本</span><span>${flag(rv.scriptExists, rv.script || '未配置')}</span></div>
           <div class="kv"><span>解释器（venv）</span><span>${flag(rv.pythonExists, rv.python || '未配置')}</span></div>
           <div class="kv"><span>浏览器 profile</span><span>${flag(rv.profileExists, rv.profile || '未配置')}</span></div>
-          <div class="kv"><span>当前快照</span><span>${rv.snapshotExists
+          <div class="kv"><span>当前数据</span><span>${rv.snapshotExists
             ? `${Number(rv.snapshotCount || 0).toLocaleString('zh-CN')} 条 · 截至 ${esc(rv.snapshotDateMax || '—')} · 采集于 ${esc(rv.snapshotMtime || '')}`
             : '<span class="muted">尚未采集</span>'}</span></div>
           <div class="kv"><span>保留范围</span><span>发表时间早于 ${esc(rv.before || '不过滤')}</span></div>
           <div class="mono" style="margin-top:8px;color:var(--muted);word-break:break-all">${esc(rv.snapshot || '—')}</div>
           <div class="row" style="margin-top:12px">
-            <button class="btn" id="btnReviewsCollect2">重新采集点评</button>
+            <button class="btn" data-collect-kind="reviews">采集全渠道点评</button>
             <span class="note">1–3 分钟；会打开可见浏览器</span>
           </div>
-           <div class="note" style="margin-top:8px">采集依赖已登录的 profile。若浏览器停在登录墙或滑块，需要你手动处理，任务最多等 ${esc(rv.timeout || '—')} 秒；超时或失败都不会覆盖已有快照。</div>`)}
+           <div class="note" style="margin-top:8px">采集依赖已登录的 profile。若浏览器停在登录墙或滑块，需要你手动处理，任务最多等 ${esc(rv.timeout || '—')} 秒；超时或失败都不会覆盖已有数据。</div>`)}
         ${card('eBook 经营数据采集（经营报表的数据源）', `
           <div class="kv"><span>采集脚本</span><span>${flag(eb.scriptExists, eb.script || '未配置')}</span></div>
           <div class="kv"><span>解释器（venv）</span><span>${flag(eb.pythonExists, eb.python || '未配置')}</span></div>
           <div class="kv"><span>浏览器 profile</span><span>${flag(eb.profileExists, eb.profile || '未配置')}</span></div>
-          <div class="kv"><span>当前快照</span><span>${eb.snapshotExists
+          <div class="kv"><span>当前数据</span><span>${eb.snapshotExists
             ? `已采集 · 采集于 ${esc(eb.snapshotMtime || '—')}`
             : '<span class="muted">尚未采集</span>'}</span></div>
           <div class="mono" style="margin-top:8px;color:var(--muted);word-break:break-all">${esc(eb.snapshot || '—')}</div>
           <div class="row" style="margin-top:12px">
-            <button class="btn primary" id="btnEbookCollect2">重新采集经营数据</button>
+            <button class="btn primary" data-collect-kind="ebook">采集经营数据</button>
             <span class="note">只读 · 约 1–2 分钟；会打开可见浏览器</span>
           </div>
-          <div class="note" style="margin-top:8px">只监听后台只读接口响应，不主动重放、不写任何后台。需 profile 已登录 ebooking；未登录/停在风控时需手动处理，任务最多等 ${esc(eb.timeout || '—')} 秒，超时或失败都不覆盖已有快照。</div>`)}
+          <div class="note" style="margin-top:8px">只监听后台只读接口响应，不主动重放、不写任何后台。需 profile 已登录 ebooking；未登录/停在风控时需手动处理，任务最多等 ${esc(eb.timeout || '—')} 秒，超时或失败都不覆盖已有数据。</div>`)}
         ${card('回复草稿与模型（可选增强）', `
           <div class="kv"><span>草稿总数</span><span>${(s.replies && s.replies.total) || 0} 条</span></div>
           <div class="kv"><span>待确认 / 已采用 / 已弃用</span><span>${(s.replies && s.replies.draft) || 0} / ${(s.replies && s.replies.used) || 0} / ${(s.replies && s.replies.discarded) || 0}</span></div>
@@ -1189,9 +1212,7 @@ async function renderSystem(box) {
       </div>
       ${card('模块清单', `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>模块</th><th>状态</th><th>说明</th></tr></thead><tbody>
         ${s.modules.map((m) => `<tr><td class="name">${esc(m.title)}</td>
-          <td>${m.status === 'live' ? '<span class="ok">实时</span>'
-              : (m.status === 'snapshot' ? '<span class="warm">快照</span>'
-              : '<span class="muted">示例</span>')}</td>
+          <td>${m.status === 'static' ? '<span class="muted">示例</span>' : '<span class="ok">采集</span>'}</td>
           <td class="muted">${esc(m.statusNote || '—')}</td></tr>`).join('')}
       </tbody></table></div>`)}
     </div>
@@ -1201,49 +1222,140 @@ async function renderSystem(box) {
       <div class="note">${esc((s.staticMeta && s.staticMeta.disclaimer) || '')}</div>
     </div>
   `;
-
-  const b = $('#btnCollect2');
-  if (b) b.addEventListener('click', () => startCollect('prices'));
-  const br = $('#btnReviewsCollect2');
-  if (br) br.addEventListener('click', () => startCollect('reviews'));
-  const be = $('#btnEbookCollect2');
-  if (be) be.addEventListener('click', () => startCollect('ebook'));
 }
 
 /* ==========================================================================
    采集任务
    ========================================================================== */
+function currentPageMeta() {
+  return PAGES.find((p) => p.key === state.page) || PAGES[0];
+}
+
+/** 最近一次采集时间：三类数据来源不同，分别从 /api/status 取。 */
+function collectLast(kind) {
+  const s = state.status;
+  if (!s) return '读取中…';
+  if (kind === 'prices') {
+    const dates = (s.database && s.database.dates) || [];
+    return dates[0] ? `最近 ${dates[0]}` : '尚未采集';
+  }
+  if (kind === 'ebook') {
+    const at = s.ebook && s.ebook.snapshotMtime;
+    return at ? `最近 ${at}` : '尚未采集';
+  }
+  if (kind === 'reviews') {
+    const at = s.reviews && s.reviews.snapshotMtime;
+    const n = s.reviews && s.reviews.snapshotCount;
+    if (!at) return '尚未采集';
+    return `最近 ${at}${n ? ' · ' + Number(n).toLocaleString('zh-CN') + ' 条' : ''}`;
+  }
+  return '';
+}
+
+function collectMenuHtml() {
+  const running = state.jobState === 'running';
+  return ['prices', 'ebook', 'reviews'].map((key) => {
+    const m = COLLECT_META[key];
+    const active = running && state.jobKind === key;
+    return `<button class="collect-item" role="menuitem" data-collect-kind="${key}" ${running ? 'disabled' : ''}>
+      <span class="ci-head"><b>${esc(m.menuLabel)}</b><em>${active ? '进行中…' : esc(m.duration)}</em></span>
+      <span class="ci-sub">${esc(m.source)} · ${esc(collectLast(key))}</span>
+    </button>`;
+  }).join('');
+}
+
+/** 右上角采集入口：单源页只给对应类型；概览页必须先展开菜单三选一。 */
+function renderTopActions(meta) {
+  const slot = $('#collectSlot');
+  if (!slot) return;
+  const page = meta || currentPageMeta();
+  const kind = page.collect;
+  const running = state.jobState === 'running';
+
+  if (!kind) {
+    slot.innerHTML = '';
+    syncSystemCollectButtons();
+    return;
+  }
+
+  if (kind === 'multi') {
+    slot.innerHTML = `<div class="collect-wrap" id="collectWrap">
+      <button class="btn primary collect-trigger" id="btnCollectMenu" aria-haspopup="menu" aria-expanded="false"
+        ${running ? 'title="已有采集任务在运行，展开可查看进度"' : ''}>
+        ${running ? '采集中…' : '采集数据'} <span class="caret">▾</span>
+      </button>
+      <div class="collect-menu" id="collectMenu" role="menu">${collectMenuHtml()}</div>
+    </div>`;
+  } else {
+    const m = COLLECT_META[kind];
+    slot.innerHTML = `<button class="btn primary collect-single" data-collect-kind="${kind}"
+      ${running ? 'disabled title="已有采集任务在运行"' : ''}>${running ? '采集中…' : esc(m.label)}</button>`;
+  }
+  syncSystemCollectButtons();
+}
+
+function toggleCollectMenu(force) {
+  const wrap = $('#collectWrap');
+  if (!wrap) return;
+  const open = force == null ? !wrap.classList.contains('open') : force;
+  wrap.classList.toggle('open', open);
+  const trigger = $('#btnCollectMenu');
+  if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function closeCollectMenu() {
+  toggleCollectMenu(false);
+}
+
+/** 系统状态页保留三张采集卡，采集中统一置灰。 */
+function syncSystemCollectButtons() {
+  const running = state.jobState === 'running';
+  document.querySelectorAll('#content [data-collect-kind]').forEach((btn) => {
+    btn.disabled = running;
+  });
+}
+
 async function startCollect(kind) {
-  const isEbook = kind === 'ebook';
-  const isRev = kind === 'reviews';
-  const btn = isRev ? $('#btnReviewsCollect') : (isEbook ? $('#btnEbookCollect') : $('#btnCollect'));
-  if (btn) btn.disabled = true;
+  const m = COLLECT_META[kind];
+  if (!m) return;
+  if (state.jobState === 'running') {
+    toast('已有采集任务在运行，请等它结束', 'err');
+    return;
+  }
+
+  state.jobKind = kind;
+  state.jobState = 'running';
+  state.jobId = null;
+  renderTopActions();
+  syncSystemCollectButtons();
+
   try {
-    const endpoint = isRev ? '/api/reviews/collect' : (isEbook ? '/api/ebook/collect' : '/api/collect');
-    const job = await apiPost(endpoint, {});
+    const job = await apiPost(m.endpoint, {});
     state.jobId = job.id;
-    state.jobKind = kind || 'prices';
     showJobbar(job);
     pollJob();
   } catch (err) {
+    state.jobState = 'idle';
+    renderTopActions();
+    syncSystemCollectButtons();
     toast(err.message, 'err');
-    if (btn) btn.disabled = false;
   }
 }
 
 function showJobbar(job) {
   const bar = $('#jobbar');
   bar.classList.add('show');
-  const isEbook = (job.kind || state.jobKind) === 'ebook';
-  const isRev = (job.kind || state.jobKind) === 'reviews';
-  $('#jbTitle').textContent = (isRev ? '点评采集 #' : (isEbook ? 'eBook 经营采集 #' : '采集任务 #')) + (job.id || '');
+  const kind = job.kind || state.jobKind || 'prices';
+  const titles = { prices: '竞品价格采集 #', ebook: '经营数据采集 #', reviews: '点评采集 #' };
+  state.jobState = job.state || 'running';
+  $('#jbTitle').textContent = (titles[kind] || '采集任务 #') + (job.id || '');
   paintJob(job);
 }
 
 function paintJob(job) {
   const running = job.state === 'running';
-  const isEbook = (job.kind || state.jobKind) === 'ebook';
-  const isRev = (job.kind || state.jobKind) === 'reviews';
+  const kind = job.kind || state.jobKind || 'prices';
+  state.jobState = job.state || state.jobState;
   $('#jbSpin').style.display = running ? '' : 'none';
   const badge = $('#jbState');
   badge.className = 'badge ' + (job.state === 'done' ? 'live' : (job.state === 'failed' ? 'warm' : ''));
@@ -1252,15 +1364,15 @@ function paintJob(job) {
   const body = $('.jb-body');
   if (body) body.scrollTop = body.scrollHeight;
   $('#jbHint').textContent = running
-    ? (isRev
+    ? (kind === 'reviews'
       ? '正在调用携程点评采集脚本。浏览器会自动打开，若停在登录/滑块页请手动处理，通常 1–3 分钟'
-      : (isEbook
+      : (kind === 'ebook'
         ? '正在调用 eBook 经营数据采集脚本。浏览器会自动打开，若停在登录页请手动处理，通常 1–2 分钟'
-        : '正在调用携程采集脚本，通常需要 30–90 秒'))
+        : '正在调用携程竞品价格采集脚本，通常需要 30–90 秒'))
     : (job.state === 'done'
-        ? (isRev ? '完成。点评快照已更新，页面指标随之变化'
-          : isEbook ? '完成。eBook 经营数据已更新，经营报表已刷新'
-          : '完成。数据已写入 pricing.db')
+        ? (kind === 'reviews' ? '完成。点评数据已更新，页面指标随之变化'
+          : kind === 'ebook' ? '完成。eBook 经营数据已更新，经营报表已刷新'
+          : '完成。竞品价格已写入 pricing.db')
         : ('失败：' + (job.error || '')));
 }
 
@@ -1272,29 +1384,27 @@ function pollJob() {
       paintJob(job);
       if (job.state === 'running') {
         pollJob();
-      } else {
-        const isEbook = (job.kind || state.jobKind) === 'ebook';
-        const isRev = (job.kind || state.jobKind) === 'reviews';
-        ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2', '#btnEbookCollect', '#btnEbookCollect2'].forEach((sel) => {
-          const b = $(sel);
-          if (b) b.disabled = false;
-        });
-        toast(
-          job.state === 'done'
-            ? (isRev ? '点评采集完成，口碑数据已更新'
-              : isEbook ? 'eBook 经营数据采集完成，经营报表已刷新'
-              : '采集完成，数据已更新')
-            : '采集失败，展开右下角看日志',
-          job.state === 'done' ? 'ok' : 'err'
-        );
-        renderPage();
-        loadStatus();
+        return;
       }
+
+      const kind = job.kind || state.jobKind || 'prices';
+      state.jobState = job.state;
+      renderTopActions();
+      syncSystemCollectButtons();
+      toast(
+        job.state === 'done'
+          ? (kind === 'reviews' ? '点评采集完成，口碑数据已更新'
+            : kind === 'ebook' ? 'eBook 经营数据采集完成，经营报表已刷新'
+            : '竞品价格采集完成，数据已更新')
+          : '采集失败，展开右下角看日志',
+        job.state === 'done' ? 'ok' : 'err'
+      );
+      renderPage();
+      loadStatus();
     } catch (err) {
-      ['#btnCollect', '#btnReviewsCollect', '#btnReviewsCollect2', '#btnEbookCollect', '#btnEbookCollect2'].forEach((sel) => {
-        const b = $(sel);
-        if (b) b.disabled = false;
-      });
+      state.jobState = 'failed';
+      renderTopActions();
+      syncSystemCollectButtons();
       toast('任务状态读取失败：' + err.message, 'err');
     }
   }, 1500);
@@ -1308,23 +1418,55 @@ async function loadStatus() {
     const s = await apiGet('/api/status');
     state.status = s;
     $('#sideHotel').innerHTML = `<b>${esc(s.hotel.name)}</b>${esc(s.hotel.city || '')} · ${esc(s.dataSource)} 模式`;
-    if (s.jobs && s.jobs.length && s.jobs[0].state === 'running' && !state.jobId) {
-      state.jobId = s.jobs[0].id;
-      state.jobKind = s.jobs[0].kind || 'prices';
-      showJobbar(s.jobs[0]);
-      $('#btnCollect').disabled = true;
+    const runningJob = (s.jobs || []).find((j) => j.state === 'running');
+    if (runningJob && !state.jobId) {
+      state.jobId = runningJob.id;
+      state.jobKind = runningJob.kind || 'prices';
+      state.jobState = 'running';
+      showJobbar(runningJob);
       pollJob();
     }
+    renderTopActions();
+    syncSystemCollectButtons();
   } catch (err) {
     $('#sideHotel').innerHTML = '<b>无法读取状态</b>服务未就绪';
+    renderTopActions();
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#btnRefresh').addEventListener('click', () => { renderPage(); loadStatus(); });
-  $('#btnCollect').addEventListener('click', () => startCollect('prices'));
   $('#jbClose').addEventListener('click', () => $('#jobbar').classList.remove('show'));
   window.addEventListener('hashchange', route);
+
+  // 顶部采集入口：概览页展开菜单；其余页一键直达
+  $('#collectSlot').addEventListener('click', (e) => {
+    const trigger = e.target.closest('#btnCollectMenu');
+    if (trigger) {
+      e.stopPropagation();
+      toggleCollectMenu();
+      return;
+    }
+    const item = e.target.closest('[data-collect-kind]');
+    if (item && !item.disabled) {
+      closeCollectMenu();
+      startCollect(item.dataset.collectKind);
+    }
+  });
+
+  // 系统状态页与空态里的采集按钮
+  $('#content').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-collect-kind]');
+    if (btn && !btn.disabled) startCollect(btn.dataset.collectKind);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#collectWrap')) closeCollectMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCollectMenu();
+  });
+
   if (!location.hash) location.hash = '#/overview';
   loadStatus();
   route();

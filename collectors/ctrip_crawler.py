@@ -182,7 +182,7 @@ class RealCtripCrawler:
             from app import config as cfg
             raise cfg.ConfigError(
                 "真实模式下缺少自家酒店的当前价/入住率：请先采集 eBook 经营数据"
-                "（ebook_collector.py 或中台「重新采集经营数据」）。"
+                "（ebook_collector.py 或中台「采集经营数据」）。"
                 "本系统不再从 .env 读取 MY_HOTEL_CURRENT_PRICE / MY_HOTEL_OCCUPANCY_RATE。"
             )
 

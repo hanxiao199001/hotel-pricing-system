@@ -326,6 +326,10 @@ def summarize(data=None):
             "pageCount": int(data.get("page_count") or 0),
             "pageSize": int(data.get("page_size") or 0),
             "coverage": round(len(reviews) / total_count * 100, 1) if total_count else None,
+            # 采集模式：incremental（增量合并）/ full（全量校准）/ None（旧格式快照）
+            "collectionMode": data.get("_collection_mode"),
+            "lastFullSync": data.get("_last_full_sync") or None,
+            "added": data.get("_added"),
         },
         "overall": {
             "count": len(reviews),

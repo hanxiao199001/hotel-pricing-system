@@ -83,6 +83,19 @@ def test_build_command_omits_optional_city_and_before():
     assert "--before" not in cmd
 
 
+def test_build_command_adds_incremental_and_full_flags():
+    inc = reviews_runner.build_command(
+        dict(CFG, existing_confirm_pages=3), "o.json", "某酒店",
+        existing_path=r"D:\old\reviews.json")
+    assert inc[inc.index("--existing") + 1] == r"D:\old\reviews.json"
+    assert inc[inc.index("--confirm-pages") + 1] == "3"
+    assert "--full" not in inc
+
+    full = reviews_runner.build_command(CFG, "o.json", "某酒店", full=True)
+    assert "--full" in full
+    assert "--existing" not in full
+
+
 def test_resolve_before_defaults_to_tomorrow():
     got = reviews_runner.resolve_before(dict(CFG, before=None, before_days=1))
     from datetime import date, timedelta
@@ -126,6 +139,40 @@ def test_validate_accepts_when_hotel_name_has_prefix():
 def test_validate_rejects_empty_reviews():
     with pytest.raises(reviews_runner.ReviewsCollectError, match="为空"):
         reviews_runner.validate_payload(_payload(reviews=[]))
+
+
+def test_validate_allows_empty_when_incremental():
+    """增量模式下「没有新点评」是正常结果，不该判为采集失败。"""
+    out = reviews_runner.validate_payload(_payload(reviews=[]), allow_empty=True)
+    assert out["kept"] == 0
+    assert out["payload"]["reviews"] == []
+
+
+def test_due_for_full_sync_rules():
+    from datetime import datetime
+    now = datetime(2026, 11, 5, 9, 0)
+    cfgd = {"full_sync_days": 7}
+    assert reviews_runner.due_for_full_sync(None, cfgd, now=now) is True
+    assert reviews_runner.due_for_full_sync({}, cfgd, now=now) is True
+    fresh = {"_last_full_sync": "2026-11-03 09:00"}
+    assert reviews_runner.due_for_full_sync(fresh, cfgd, now=now) is False
+    stale = {"_last_full_sync": "2026-10-20 09:00"}
+    assert reviews_runner.due_for_full_sync(stale, cfgd, now=now) is True
+    # full_sync_days <= 0：关闭增量，每次都全量
+    assert reviews_runner.due_for_full_sync(fresh, {"full_sync_days": 0}, now=now) is True
+
+
+def test_merge_reviews_keeps_old_and_adds_new():
+    old = [{"id": 1, "created_at": "2026-09-01", "content": "old"},
+           {"id": 2, "created_at": "2026-09-02", "content": "old"}]
+    new = [{"id": 2, "created_at": "2026-09-02", "content": "updated"},
+           {"id": 3, "created_at": "2026-10-01", "content": "new"}]
+    merged, added = reviews_runner.merge_reviews(old, new)
+    assert added == 1
+    assert {r["id"] for r in merged} == {1, 2, 3}
+    assert next(r for r in merged if r["id"] == 2)["content"] == "updated"
+    # 合并结果按时间倒序，便于人看
+    assert [r["id"] for r in merged] == [3, 2, 1]
 
 
 def test_validate_drops_rows_without_date_and_dedupes():
@@ -298,6 +345,109 @@ def test_fast_failure_retries_once(monkeypatch, tmp_path):
     assert calls["n"] == 2
     assert res["kept"] == 2
     assert os.path.isfile(cfgd["path"])  # 原子替换后目标文件存在
+
+
+def test_incremental_collect_merges_with_existing(monkeypatch, tmp_path):
+    """增量模式：只把新增合并进旧快照，旧点评不丢，且把旧快照作为边界传给脚本。"""
+    from datetime import datetime
+    cfgd = _runnable_cfg(tmp_path, full_sync_days=7, full_sync_min_ratio=0.5)
+    primary = cfgd["path"]
+    os.makedirs(os.path.dirname(primary), exist_ok=True)
+    old = {
+        "status": "ok",
+        "reviews": [
+            {"id": 1, "rating": 5, "created_at": "2026-09-01 10:00:00", "content": "old1"},
+            {"id": 2, "rating": 2, "created_at": "2026-09-02 10:00:00", "content": "old2"},
+        ],
+        "_last_full_sync": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    with open(primary, "w", encoding="utf-8") as f:
+        json.dump(old, f, ensure_ascii=False)
+
+    def fake_run(cmd, cfg_dict, env, log):
+        assert "--existing" in cmd
+        assert cmd[cmd.index("--existing") + 1] == primary
+        assert "--full" not in cmd
+        out = cmd[cmd.index("--out") + 1]
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(_payload(reviews=[
+                {"id": 3, "rating": 5, "created_at": "2026-10-01 10:00:00", "content": "new"},
+            ]), f, ensure_ascii=False)
+        return {"rc": 0, "errLines": [], "tail": [], "timedOut": False}
+
+    monkeypatch.setattr(reviews_runner, "_run_script", fake_run)
+    res = reviews_runner.collect(cfg_dict=cfgd)
+
+    assert res["mode"] == "incremental"
+    assert res["added"] == 1
+    assert res["kept"] == 3
+    with open(primary, encoding="utf-8") as f:
+        saved = json.load(f)
+    assert {r["id"] for r in saved["reviews"]} == {1, 2, 3}
+    assert saved["_collection_mode"] == "incremental"
+
+
+def test_incremental_without_new_keeps_old_snapshot(monkeypatch, tmp_path):
+    """没有新点评时不写盘，旧快照与 mtime 都不变。"""
+    from datetime import datetime
+    cfgd = _runnable_cfg(tmp_path, full_sync_days=7)
+    primary = cfgd["path"]
+    os.makedirs(os.path.dirname(primary), exist_ok=True)
+    old = {
+        "status": "ok",
+        "reviews": [{"id": 1, "rating": 5, "created_at": "2026-09-01 10:00:00", "content": "old"}],
+        "_last_full_sync": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    with open(primary, "w", encoding="utf-8") as f:
+        json.dump(old, f, ensure_ascii=False)
+    before_mtime = os.stat(primary).st_mtime
+
+    def fake_run(cmd, cfg_dict, env, log):
+        out = cmd[cmd.index("--out") + 1]
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(_payload(reviews=[]), f, ensure_ascii=False)
+        return {"rc": 0, "errLines": [], "tail": [], "timedOut": False}
+
+    monkeypatch.setattr(reviews_runner, "_run_script", fake_run)
+    res = reviews_runner.collect(cfg_dict=cfgd)
+
+    assert res["mode"] == "incremental"
+    assert res["added"] == 0
+    assert res["kept"] == 1
+    assert os.stat(primary).st_mtime == before_mtime
+
+
+def test_full_sync_rejects_shrunken_result(monkeypatch, tmp_path):
+    """全量校准采到的条数明显少于旧快照时拒绝覆盖，旧快照原样保留。"""
+    cfgd = _runnable_cfg(tmp_path, full_sync_days=7, full_sync_min_ratio=0.5)
+    primary = cfgd["path"]
+    os.makedirs(os.path.dirname(primary), exist_ok=True)
+    old = {
+        "status": "ok",
+        "reviews": [
+            {"id": i, "rating": 5, "created_at": "2026-09-01 10:00:00", "content": "x"}
+            for i in range(10)
+        ],
+        "_last_full_sync": "2000-01-01 00:00",  # 早已过期 → 触发全量校准
+    }
+    with open(primary, "w", encoding="utf-8") as f:
+        json.dump(old, f, ensure_ascii=False)
+
+    def fake_run(cmd, cfg_dict, env, log):
+        assert "--full" in cmd
+        out = cmd[cmd.index("--out") + 1]
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(_payload(reviews=[
+                {"id": 1, "rating": 5, "created_at": "2026-09-01 10:00:00", "content": "x"},
+            ]), f, ensure_ascii=False)
+        return {"rc": 0, "errLines": [], "tail": [], "timedOut": False}
+
+    monkeypatch.setattr(reviews_runner, "_run_script", fake_run)
+    with pytest.raises(reviews_runner.ReviewsCollectError, match="保护线"):
+        reviews_runner.collect(cfg_dict=cfgd)
+    with open(primary, encoding="utf-8") as f:
+        saved = json.load(f)
+    assert len(saved["reviews"]) == 10  # 旧快照没被覆盖
 
 
 def test_timeout_is_not_retried(monkeypatch, tmp_path):
